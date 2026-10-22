@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">LinguaVoice</string>
+    <string name="tab_practice">Aprender</string>
+    <string name="tab_challenges">Desafíos</string>
+    <string name="tab_conversations">Diálogo</string>
+    <string name="tab_profile">Progreso</string>
+    <string name="streak_label">Días de racha</string>
+    <string name="xp_label">EXP</string>
+    <string name="gems_label">Gemas</string>
+    <string name="hearts_label">Vidas</string>
+    <string name="listen_button">Escuchar</string>
+    <string name="speak_button">Mantén o toca para hablar</string>
+    <string name="pronounce_feedback_great">¡Excelente pronunciación!</string>
+    <string name="pronounce_feedback_good">¡Muy bien, casi perfecto!</string>
+    <string name="pronounce_feedback_try_again">Sigue practicando, ¡tú puedes!</string>
+    <string name="permission_mic_rationale">LinguaVoice necesita acceso al micrófono para evaluar tu pronunciación en tiempo real.</string>
+</resources>

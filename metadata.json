@@ -1,0 +1,6 @@
+{
+  "name": "LinguaVoice",
+  "description": "Juego interactivo para aprender a hablar idiomas con reconocimiento de voz en tiempo real, práctica de pronunciación, feedback instantáneo estilo Duolingo, vidas, rachas y niveles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
