@@ -23,7 +23,10 @@ fun PronunciationResultSheet(
     onContinue: () -> Unit,
     onRetry: () -> Unit,
     onWordClick: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    remainingLives: Int? = null,
+    maxLives: Int = 5,
+    onReplayFeedbackSound: (() -> Unit)? = null
 ) {
     AnimatedVisibility(
         visible = result != null,
@@ -44,6 +47,9 @@ fun PronunciationResultSheet(
                 onWordClick = onWordClick,
                 onRetry = onRetry,
                 onContinue = onContinue,
+                remainingLives = remainingLives,
+                maxLives = maxLives,
+                onReplayFeedbackSound = onReplayFeedbackSound,
                 modifier = Modifier.fillMaxWidth()
             )
         }

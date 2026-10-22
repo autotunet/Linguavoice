@@ -1,11 +1,16 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,18 +25,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -60,14 +73,21 @@ import com.example.ui.theme.DuoYellow
 @Composable
 fun DailyStreakCard(
     streakInfo: StreakInfo,
+    isHidden: Boolean = false,
+    onHide: () -> Unit = {},
+    onOpenDetail: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var showStreakDetailDialog by remember { mutableStateOf(false) }
+    var showInternalDetailDialog by remember { mutableStateOf(false) }
+    // When daily streak is completed, start compact/collapsed so it takes minimal space
+    var isExpanded by remember(streakInfo.practicedToday) {
+        mutableStateOf(!streakInfo.practicedToday)
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "flame_pulse")
     val flameScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.15f,
+        initialValue = 0.96f,
+        targetValue = 1.10f,
         animationSpec = infiniteRepeatable(
             animation = tween(900, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -75,126 +95,180 @@ fun DailyStreakCard(
         label = "flame_scale"
     )
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("daily_streak_card")
-            .clickable { showStreakDetailDialog = true },
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        border = androidx.compose.foundation.BorderStroke(2.dp, if (streakInfo.practicedToday) DuoOrange.copy(alpha = 0.4f) else DuoCardBorder)
+    AnimatedVisibility(
+        visible = !isHidden,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
     ) {
-        Column(
-            modifier = Modifier
+        Card(
+            modifier = modifier
                 .fillMaxWidth()
-                .padding(18.dp)
+                .testTag("daily_streak_card")
+                .clickable {
+                    if (onOpenDetail != null) {
+                        onOpenDetail()
+                    } else {
+                        showInternalDetailDialog = true
+                    }
+                },
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.5.dp,
+                if (streakInfo.practicedToday) DuoOrange.copy(alpha = 0.35f) else DuoCardBorder
+            )
         ) {
-            // Header with animated flame and streak count
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
+                // Compact single-line header
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0xFFFFD54F),
-                                        DuoOrange,
-                                        DuoOrangeDark
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
-                            contentDescription = "Fuego de racha",
-                            tint = Color.White,
+                        Box(
                             modifier = Modifier
                                 .size(34.dp)
-                                .scale(flameScale)
-                        )
-                    }
-
-                    Column {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = "${streakInfo.currentStreak}",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Black,
-                                color = DuoOrange
-                            )
-                            Text(
-                                text = " DÍAS DE RACHA",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Black,
-                                color = DuoOrange,
-                                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
-                                letterSpacing = 0.5.sp
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFFD54F),
+                                            DuoOrange,
+                                            DuoOrangeDark
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFireDepartment,
+                                contentDescription = "Fuego de racha",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .scale(flameScale)
                             )
                         }
 
-                        Text(
-                            text = if (streakInfo.practicedToday) {
-                                "¡Racha de hoy completada! 🔥"
-                            } else {
-                                "¡Practica hoy para mantener tu fuego activo!"
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (streakInfo.practicedToday) DuoGreen else Color(0xFF777777)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "${streakInfo.currentStreak} DÍAS DE RACHA",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = DuoOrange,
+                                    letterSpacing = 0.3.sp
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (streakInfo.practicedToday) Color(0xFFE8F5E9)
+                                            else Color(0xFFFFF3CD)
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (streakInfo.practicedToday) "Completada ✅" else "Pendiente ⏳",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (streakInfo.practicedToday) Color(0xFF2E7D32) else Color(0xFFB78103)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = if (streakInfo.practicedToday) {
+                                    "¡Racha del día completada! Toca para ver detalles"
+                                } else {
+                                    "¡Practica hoy para mantener tu fuego activo!"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (streakInfo.practicedToday) DuoGreen else Color(0xFF777777),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { isExpanded = !isExpanded },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("toggle_streak_expand_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isExpanded) "Contraer racha" else "Expandir racha",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onHide,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("hide_streak_card_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Ocultar racha de hoy",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
-                // Status Badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (streakInfo.practicedToday) Color(0xFFE8F5E9) else Color(0xFFFFF3CD))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                // Collapsible Week Days Bar
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
                 ) {
-                    Text(
-                        text = if (streakInfo.practicedToday) "Activo ✅" else "Pendiente ⏳",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (streakInfo.practicedToday) Color(0xFF2E7D32) else Color(0xFFB78103)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Week Days Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                streakInfo.currentWeekDays.forEach { weekDay ->
-                    WeekDayCircle(weekDay = weekDay)
+                    Column {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            streakInfo.currentWeekDays.forEach { weekDay ->
+                                WeekDayCircle(weekDay = weekDay)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    if (showStreakDetailDialog) {
+    if (showInternalDetailDialog) {
         StreakDetailDialog(
             streakInfo = streakInfo,
-            onDismiss = { showStreakDetailDialog = false }
+            onDismiss = { showInternalDetailDialog = false }
         )
     }
 }
@@ -302,26 +376,29 @@ fun WeekDayCircle(weekDay: WeekDayStreak) {
 @Composable
 fun StreakDetailDialog(
     streakInfo: StreakInfo,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDismissAndHideBanner: (() -> Unit)? = null
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("streak_emergent_dialog")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(64.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.verticalGradient(
@@ -334,7 +411,21 @@ fun StreakDetailDialog(
                         imageVector = Icons.Default.LocalFireDepartment,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(44.dp)
+                        modifier = Modifier.size(38.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (streakInfo.practicedToday) Color(0xFFE8F5E9) else Color(0xFFFFF3CD))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (streakInfo.practicedToday) "¡Racha del día completada! ✅" else "Racha diaria activa 🔥",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (streakInfo.practicedToday) Color(0xFF2E7D32) else Color(0xFFB78103)
                     )
                 }
 
@@ -345,12 +436,21 @@ fun StreakDetailDialog(
                     color = DuoOrange
                 )
 
-                Text(
-                    text = "Tu progreso se almacena en Room. Revisa tu actividad semanal y el avance de tu precisión de voz:",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
+                if (streakInfo.currentWeekDays.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        streakInfo.currentWeekDays.forEach { weekDay ->
+                            WeekDayCircle(weekDay = weekDay)
+                        }
+                    }
+                }
 
                 // Weekly Activity & Accuracy Trend Bar Chart
                 WeeklyActivityChart(
@@ -364,7 +464,7 @@ fun StreakDetailDialog(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        .padding(14.dp),
+                        .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -372,7 +472,7 @@ fun StreakDetailDialog(
                         Text(
                             text = "${streakInfo.currentStreak} días",
                             fontWeight = FontWeight.Black,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             color = DuoOrange
                         )
                     }
@@ -381,7 +481,7 @@ fun StreakDetailDialog(
                         Text(
                             text = "${streakInfo.bestStreak} días",
                             fontWeight = FontWeight.Black,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             color = DuoYellow
                         )
                     }
@@ -390,7 +490,7 @@ fun StreakDetailDialog(
                         Text(
                             text = "${streakInfo.totalDaysPracticed}",
                             fontWeight = FontWeight.Black,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             color = DuoGreen
                         )
                     }
@@ -400,8 +500,30 @@ fun StreakDetailDialog(
                     text = "¡ENTENDIDO!",
                     onClick = onDismiss,
                     colorStyle = DuoButtonColor.ORANGE,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "dismiss_streak_popup_button"
                 )
+
+                if (onDismissAndHideBanner != null) {
+                    TextButton(
+                        onClick = onDismissAndHideBanner,
+                        modifier = Modifier.testTag("dismiss_and_hide_streak_banner_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Ocultar tarjeta de racha por hoy",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.Gray
+                        )
+                    }
+                }
             }
         }
     }

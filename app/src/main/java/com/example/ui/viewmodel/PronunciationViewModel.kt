@@ -12,6 +12,8 @@ import android.speech.SpeechRecognizer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.PronunciationEvaluator
+import com.example.audio.PronunciationFeedbackSoundType
+import com.example.audio.SoundEffectsManager
 import com.example.audio.SpeechState
 import com.example.data.model.Exercise
 import com.example.data.model.Language
@@ -20,7 +22,6 @@ import com.example.data.model.WordAccuracy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 enum class RecognitionStatus {
     IDLE,
@@ -44,14 +45,32 @@ data class PronunciationUiState(
     val recognitionAlternatives: List<String> = emptyList(),
     val evaluationResult: PronunciationResult? = null,
     val errorMessage: String? = null,
-    val isSpeechAvailable: Boolean = true
-)
+    val isSpeechAvailable: Boolean = true,
+    val currentLives: Int = MAX_LIVES,
+    val maxLives: Int = MAX_LIVES,
+    val isLevelRestarted: Boolean = false,
+    val completedExercisesInLevel: Int = 0,
+    val totalExercisesInLevel: Int = 1,
+    val levelProgressFraction: Float = 0f,
+    val levelProgressPercentage: Int = 0,
+    val lastFeedbackSound: PronunciationFeedbackSoundType? = null,
+    val isCelebrationActive: Boolean = false,
+    val celebrationTriggerId: Int = 0,
+    val celebrationCount: Int = 0
+) {
+    companion object {
+        const val MAX_LIVES = 5
+    }
+}
 
 /**
  * ViewModel that directly encapsulates Android's SpeechRecognizer API to handle
  * real-time voice-to-text conversion and live word-by-word pronunciation evaluation.
  */
-class PronunciationViewModel(application: Application) : AndroidViewModel(application) {
+class PronunciationViewModel(
+    application: Application,
+    val soundEffectsManager: SoundEffectsManager = SoundEffectsManager(application)
+) : AndroidViewModel(application) {
 
     private val context: Context get() = getApplication<Application>().applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -68,6 +87,7 @@ class PronunciationViewModel(application: Application) : AndroidViewModel(applic
     val speechState: StateFlow<SpeechState> = _speechState.asStateFlow()
 
     private var currentExercise: Exercise? = null
+    var onEvaluationCompleted: ((PronunciationResult, String) -> Unit)? = null
 
     init {
         initSpeechRecognizer()
@@ -277,7 +297,8 @@ class PronunciationViewModel(application: Application) : AndroidViewModel(applic
             confidenceScore = 0f,
             recognitionAlternatives = emptyList(),
             errorMessage = null,
-            status = RecognitionStatus.IDLE
+            status = RecognitionStatus.IDLE,
+            isCelebrationActive = false
         )
         _speechState.value = SpeechState.Idle
     }
@@ -326,7 +347,8 @@ class PronunciationViewModel(application: Application) : AndroidViewModel(applic
             confidenceScore = 0f,
             recognitionAlternatives = emptyList(),
             evaluationResult = null,
-            errorMessage = null
+            errorMessage = null,
+            isCelebrationActive = false
         )
         _speechState.value = SpeechState.Listening(rmsDb = 2.5f, partialText = "")
 
@@ -408,37 +430,166 @@ class PronunciationViewModel(application: Application) : AndroidViewModel(applic
         val target = _uiState.value.targetPhrase
         val language = _uiState.value.language
 
-        viewModelScope.launch {
-            val liveWords = PronunciationEvaluator.evaluateLivePartialWords(target, spokenText)
-            _uiState.value = _uiState.value.copy(
-                status = RecognitionStatus.ANALYZING,
-                isListening = false,
-                rmsDb = 0f,
-                partialSpokenText = spokenText,
-                recognizedText = spokenText,
-                liveWordAccuracies = liveWords,
-                confidenceScore = confidenceScore,
-                recognitionAlternatives = alternatives,
-                errorMessage = null
-            )
-            _speechState.value = SpeechState.Processing
+        val liveWords = PronunciationEvaluator.evaluateLivePartialWords(target, spokenText)
+        _uiState.value = _uiState.value.copy(
+            status = RecognitionStatus.ANALYZING,
+            isListening = false,
+            rmsDb = 0f,
+            partialSpokenText = spokenText,
+            recognizedText = spokenText,
+            liveWordAccuracies = liveWords,
+            confidenceScore = confidenceScore,
+            recognitionAlternatives = alternatives,
+            errorMessage = null
+        )
+        _speechState.value = SpeechState.Processing
 
-            val result = PronunciationEvaluator.evaluate(
-                targetPhrase = target,
-                spokenPhrase = spokenText,
-                exercise = currentExercise,
-                language = language
-            )
+        val result = PronunciationEvaluator.evaluate(
+            targetPhrase = target,
+            spokenPhrase = spokenText,
+            exercise = currentExercise,
+            language = language
+        )
 
-            _uiState.value = _uiState.value.copy(
-                status = RecognitionStatus.SUCCESS,
-                isListening = false,
-                evaluationResult = result,
-                recognizedText = spokenText,
-                liveWordAccuracies = result.wordAccuracies
-            )
-            _speechState.value = SpeechState.Success(spokenText)
+        val currentLivesBefore = _uiState.value.currentLives
+        val maxLives = _uiState.value.maxLives
+        val remainingLives = if (result.isPassed) {
+            currentLivesBefore
+        } else {
+            (currentLivesBefore - 1).coerceAtLeast(0)
         }
+        val reachedZeroLives = !result.isPassed && remainingLives == 0
+        val updatedLives = if (reachedZeroLives) maxLives else remainingLives
+
+        val totalInLevel = _uiState.value.totalExercisesInLevel.coerceAtLeast(1)
+        val updatedCompletedInLevel = when {
+            reachedZeroLives -> 0
+            result.isPassed -> (_uiState.value.completedExercisesInLevel + 1).coerceIn(0, totalInLevel)
+            else -> _uiState.value.completedExercisesInLevel
+        }
+        val updatedFraction = (updatedCompletedInLevel.toFloat() / totalInLevel.toFloat()).coerceIn(0f, 1f)
+        val updatedPercentage = ((updatedFraction * 100f).toInt()).coerceIn(0, 100)
+
+        val feedbackSound = if (result.isPassed) {
+            PronunciationFeedbackSoundType.SUCCESS_CHIME
+        } else {
+            PronunciationFeedbackSoundType.ERROR_SOUND
+        }
+
+        val nextCelebrationTriggerId = if (result.isPassed) {
+            _uiState.value.celebrationTriggerId + 1
+        } else {
+            _uiState.value.celebrationTriggerId
+        }
+        val nextCelebrationCount = if (result.isPassed) {
+            _uiState.value.celebrationCount + 1
+        } else {
+            _uiState.value.celebrationCount
+        }
+
+        _uiState.value = _uiState.value.copy(
+            status = RecognitionStatus.SUCCESS,
+            isListening = false,
+            evaluationResult = result,
+            recognizedText = spokenText,
+            liveWordAccuracies = result.wordAccuracies,
+            currentLives = updatedLives,
+            isLevelRestarted = reachedZeroLives,
+            completedExercisesInLevel = updatedCompletedInLevel,
+            levelProgressFraction = updatedFraction,
+            levelProgressPercentage = updatedPercentage,
+            lastFeedbackSound = feedbackSound,
+            isCelebrationActive = result.isPassed,
+            celebrationTriggerId = nextCelebrationTriggerId,
+            celebrationCount = nextCelebrationCount
+        )
+        _speechState.value = SpeechState.Success(spokenText)
+
+        val callback = onEvaluationCompleted
+        if (callback != null) {
+            callback.invoke(result, spokenText)
+        } else {
+            if (result.isPassed) {
+                soundEffectsManager.playSuccessChime(result.scorePercentage)
+            } else {
+                soundEffectsManager.playErrorSound(
+                    scorePercentage = result.scorePercentage,
+                    isLevelRestart = reachedZeroLives
+                )
+            }
+        }
+    }
+
+    /**
+     * Synchronizes current level completion percentage and exercise counts with LanguageGameViewModel
+     */
+    fun syncLevelProgress(completedExercises: Int, totalExercises: Int) {
+        val safeTotal = totalExercises.coerceAtLeast(1)
+        val safeCompleted = completedExercises.coerceIn(0, safeTotal)
+        val fraction = (safeCompleted.toFloat() / safeTotal.toFloat()).coerceIn(0f, 1f)
+        val percentage = ((fraction * 100f).toInt()).coerceIn(0, 100)
+        _uiState.value = _uiState.value.copy(
+            completedExercisesInLevel = safeCompleted,
+            totalExercisesInLevel = safeTotal,
+            levelProgressFraction = fraction,
+            levelProgressPercentage = percentage
+        )
+    }
+
+    /**
+     * Synchronizes lives state with LanguageGameViewModel
+     */
+    fun syncLives(currentLives: Int, maxLives: Int = PronunciationUiState.MAX_LIVES, isLevelRestarted: Boolean = false) {
+        _uiState.value = _uiState.value.copy(
+            currentLives = currentLives.coerceIn(0, maxLives),
+            maxLives = maxLives,
+            isLevelRestarted = isLevelRestarted
+        )
+    }
+
+    /**
+     * Deducts one life due to a pronunciation error; returns true if lives reached zero and triggered restart.
+     */
+    fun loseLife(): Boolean {
+        val maxLives = _uiState.value.maxLives
+        val nextLives = (_uiState.value.currentLives - 1).coerceAtLeast(0)
+        val reachedZero = nextLives == 0
+        if (onEvaluationCompleted == null) {
+            soundEffectsManager.playErrorSound(scorePercentage = 40, isLevelRestart = reachedZero)
+        }
+        return if (reachedZero) {
+            _uiState.value = _uiState.value.copy(
+                currentLives = maxLives,
+                isLevelRestarted = true,
+                completedExercisesInLevel = 0,
+                levelProgressFraction = 0f,
+                levelProgressPercentage = 0,
+                lastFeedbackSound = PronunciationFeedbackSoundType.ERROR_SOUND
+            )
+            true
+        } else {
+            _uiState.value = _uiState.value.copy(
+                currentLives = nextLives,
+                isLevelRestarted = false,
+                lastFeedbackSound = PronunciationFeedbackSoundType.ERROR_SOUND
+            )
+            false
+        }
+    }
+
+    /**
+     * Restores all lives to maximum
+     */
+    fun resetLives(maxLives: Int = PronunciationUiState.MAX_LIVES) {
+        _uiState.value = _uiState.value.copy(
+            currentLives = maxLives,
+            maxLives = maxLives,
+            isLevelRestarted = false
+        )
+    }
+
+    fun acknowledgeLevelRestart() {
+        _uiState.value = _uiState.value.copy(isLevelRestarted = false)
     }
 
     /**
@@ -467,7 +618,8 @@ class PronunciationViewModel(application: Application) : AndroidViewModel(applic
             confidenceScore = 0f,
             recognitionAlternatives = emptyList(),
             errorMessage = null,
-            rmsDb = 0f
+            rmsDb = 0f,
+            isCelebrationActive = false
         )
         _speechState.value = SpeechState.Idle
     }

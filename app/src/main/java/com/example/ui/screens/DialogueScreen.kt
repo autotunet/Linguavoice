@@ -58,10 +58,14 @@ import com.example.audio.SpeechState
 import com.example.data.model.DialogueScenario
 import com.example.data.model.UserProfile
 import com.example.data.repository.ExerciseRepository
+import com.example.ui.components.CurrentLevelTopProgressBar
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
+import com.example.ui.components.LevelRestartedByZeroLivesDialog
+import com.example.ui.components.LivesBarIndicator
 import com.example.ui.components.MascotBubble
 import com.example.ui.components.PronunciationResultSheet
+import com.example.ui.components.PronunciationSuccessCelebrationOverlay
 import com.example.ui.components.PulsingMicHalo
 import com.example.ui.components.WaveformVisualizer
 import com.example.ui.theme.DuoBlue
@@ -85,6 +89,9 @@ fun DialogueScreen(
     val speechState by viewModel.speechState.collectAsState()
     val pronunciationState by viewModel.pronunciationUiState.collectAsState()
     val result by viewModel.evaluationResult.collectAsState()
+    val livesState by viewModel.livesState.collectAsState()
+    val levelProgress by viewModel.levelProgressState.collectAsState()
+    val celebrationState by viewModel.celebrationState.collectAsState()
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -207,23 +214,18 @@ fun DialogueScreen(
                     .padding(horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { viewModel.navigateTo(AppScreen.PATH_LEARN) }) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Atrás")
-                    }
-                    Text(
-                        text = scenario.title,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 16.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Top Visual Progress Bar indicating percentage of the current dialogue level completed
+                CurrentLevelTopProgressBar(
+                    levelProgress = levelProgress,
+                    livesState = livesState,
+                    onCloseClick = { viewModel.navigateTo(AppScreen.PATH_LEARN) },
+                    onLivesClick = { viewModel.setHeartsDialogVisible(true) },
+                    closeButtonTestTag = "dialogue_close_button"
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Chat Messages List
                 LazyColumn(
@@ -453,15 +455,42 @@ fun DialogueScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "⚡ Demo Voz",
+                                text = "⚡ Demo OK",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF666666)
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.5.dp, DuoRed.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .background(Color(0xFFFFF5F5))
+                                .clickable { viewModel.simulatePronunciationError() }
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .testTag("dialogue_error_speech_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "💔 Error (-1)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DuoRed
                             )
                         }
                     }
                 }
             }
+
+            // Lottie-style Vector & Particle Celebration Overlay when dialogue turn is passed
+            PronunciationSuccessCelebrationOverlay(
+                celebrationState = celebrationState,
+                onReplayCelebration = { viewModel.replayCelebrationEffect() },
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
 
             // Evaluation sheet
             PronunciationResultSheet(
@@ -469,8 +498,29 @@ fun DialogueScreen(
                 onContinue = { viewModel.advanceDialogueTurn() },
                 onRetry = { viewModel.retryCurrentExercise() },
                 onWordClick = { word -> viewModel.speakWord(word) },
+                remainingLives = livesState.currentLives,
+                maxLives = livesState.maxLives,
+                onReplayFeedbackSound = {
+                    if (result?.isPassed == true) {
+                        viewModel.replayCelebrationEffect()
+                    } else {
+                        viewModel.replayLastFeedbackSound()
+                    }
+                },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
+
+            if (livesState.isLevelRestartedByZeroLives) {
+                LevelRestartedByZeroLivesDialog(
+                    lastFailedResult = livesState.lastFailedResultBeforeRestart,
+                    levelRestartCount = livesState.levelRestartCount,
+                    onConfirmRestart = { viewModel.acknowledgeLevelRestart() },
+                    onExitToMap = {
+                        viewModel.acknowledgeLevelRestart()
+                        viewModel.navigateTo(AppScreen.PATH_LEARN)
+                    }
+                )
+            }
         }
     }
 }

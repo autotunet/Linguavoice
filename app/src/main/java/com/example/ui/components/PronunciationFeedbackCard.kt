@@ -77,7 +77,10 @@ fun PronunciationFeedbackCard(
     modifier: Modifier = Modifier,
     onWordClick: ((String) -> Unit)? = null,
     onRetry: (() -> Unit)? = null,
-    onContinue: (() -> Unit)? = null
+    onContinue: (() -> Unit)? = null,
+    remainingLives: Int? = null,
+    maxLives: Int = 5,
+    onReplayFeedbackSound: (() -> Unit)? = null
 ) {
     var selectedWordAcc by remember { mutableStateOf<WordAccuracy?>(null) }
 
@@ -122,11 +125,12 @@ fun PronunciationFeedbackCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Header: Overall Accuracy Banner
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(headerBgColor)
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -135,7 +139,8 @@ fun PronunciationFeedbackCard(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Box(
                             modifier = Modifier
@@ -195,6 +200,81 @@ fun PronunciationFeedbackCard(
                                 color = accentColor
                             )
                         }
+                    }
+                }
+
+                // Audio Feedback Indicator (Success Chime vs Subtle Error Sound)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.85f))
+                        .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable(enabled = onReplayFeedbackSound != null) {
+                            onReplayFeedbackSound?.invoke()
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("audio_feedback_indicator"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = "Audio feedback",
+                            tint = accentColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (result.isPassed) {
+                                "✨ Celebración y sonido de éxito reproducidos"
+                            } else {
+                                "🎵 Tono sutil de error reproducido"
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = accentColor
+                        )
+                    }
+                    if (onReplayFeedbackSound != null) {
+                        Text(
+                            text = "Repetir",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = DuoBlue,
+                            modifier = Modifier.testTag("replay_feedback_sound_button")
+                        )
+                    }
+                }
+
+                // Life Lost Indicator when pronunciation failed
+                if (!result.isPassed && remainingLives != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.85f))
+                            .border(1.dp, DuoRed.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("life_lost_feedback_banner"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "💔 -1 vida por error de pronunciación",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DuoRed
+                        )
+                        Text(
+                            text = "Vidas: $remainingLives/$maxLives",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = DuoRed
+                        )
                     }
                 }
             }

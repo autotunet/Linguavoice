@@ -66,10 +66,14 @@ import com.example.R
 import com.example.audio.SpeechState
 import com.example.data.model.LessonModule
 import com.example.data.model.WordAccuracy
+import com.example.ui.components.CurrentLevelTopProgressBar
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
+import com.example.ui.components.LevelRestartedByZeroLivesDialog
+import com.example.ui.components.LivesBarIndicator
 import com.example.ui.components.MascotBubble
 import com.example.ui.components.PronunciationResultSheet
+import com.example.ui.components.PronunciationSuccessCelebrationOverlay
 import com.example.ui.components.PulsingMicHalo
 import com.example.ui.components.WaveformVisualizer
 import com.example.ui.theme.DuoBlue
@@ -91,12 +95,14 @@ fun SpeakingExerciseScreen(
     val context = LocalContext.current
     val exercise by viewModel.currentExercise.collectAsState()
     val activeModule by viewModel.activeModule.collectAsState()
-    val exerciseIndex by viewModel.currentExerciseIndex.collectAsState()
     val isCompleted by viewModel.isLessonCompleted.collectAsState()
     val speechState by viewModel.speechState.collectAsState()
     val pronunciationState by viewModel.pronunciationUiState.collectAsState()
     val result by viewModel.evaluationResult.collectAsState()
     val isTtsSpeaking by viewModel.isTtsSpeaking.collectAsState()
+    val livesState by viewModel.livesState.collectAsState()
+    val levelProgress by viewModel.levelProgressState.collectAsState()
+    val celebrationState by viewModel.celebrationState.collectAsState()
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -117,9 +123,6 @@ fun SpeakingExerciseScreen(
             }
         }
     }
-
-    val totalExercises = activeModule?.exercises?.size ?: 1
-    val progress = ((exerciseIndex + 1).toFloat() / totalExercises.toFloat()).coerceIn(0f, 1f)
 
     if (isCompleted) {
         LessonCompleteView(
@@ -174,44 +177,18 @@ fun SpeakingExerciseScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Top Exercise Bar: Close button & Progress
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                IconButton(
-                    onClick = { viewModel.navigateTo(AppScreen.PATH_LEARN) },
-                    modifier = Modifier.testTag("exercise_close_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Salir",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            // Top Visual Progress Bar indicating the percentage of the current level completed
+            CurrentLevelTopProgressBar(
+                levelProgress = levelProgress,
+                livesState = livesState,
+                onCloseClick = { viewModel.navigateTo(AppScreen.PATH_LEARN) },
+                onLivesClick = { viewModel.setHeartsDialogVisible(true) },
+                closeButtonTestTag = "exercise_close_button"
+            )
 
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(12.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    color = DuoGreen,
-                    trackColor = DuoCardBorder
-                )
-
-                Text(
-                    text = "${exerciseIndex + 1}/$totalExercises",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Mascot Prompt
             MascotBubble(
@@ -460,7 +437,7 @@ fun SpeakingExerciseScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 120.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // System STT Dialog
@@ -477,7 +454,7 @@ fun SpeakingExerciseScreen(
                                 startMicWithPermissionCheck()
                             }
                         }
-                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                        .padding(horizontal = 8.dp, vertical = 10.dp)
                         .testTag("system_stt_button"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
@@ -486,18 +463,18 @@ fun SpeakingExerciseScreen(
                         imageVector = Icons.Default.KeyboardVoice,
                         contentDescription = "Voz del sistema",
                         tint = DuoBlue,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Voz del Sistema",
-                        fontSize = 12.sp,
+                        text = "Voz Sistema",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = DuoBlue,
-                        modifier = Modifier.padding(start = 6.dp)
+                        modifier = Modifier.padding(start = 4.dp)
                     )
                 }
 
-                // Demo audio simulation
+                // Demo audio simulation (Pass)
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -507,20 +484,50 @@ fun SpeakingExerciseScreen(
                         .clickable {
                             viewModel.simulateSpeakingDemo(currentEx.targetPhrase)
                         }
-                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                        .padding(horizontal = 8.dp, vertical = 10.dp)
                         .testTag("simulate_speech_demo"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "⚡ Pronunciar Demo",
-                        fontSize = 12.sp,
+                        text = "⚡ Demo OK",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF666666)
+                        color = Color(0xFF2E7D32)
+                    )
+                }
+
+                // Demo pronunciation error simulation (Loses 1 life, restarts level at 0)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.5.dp, DuoRed.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .background(Color(0xFFFFF5F5))
+                        .clickable {
+                            viewModel.simulatePronunciationError()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                        .testTag("simulate_error_demo"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "💔 Error (-1)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DuoRed
                     )
                 }
             }
         }
+
+        // Lottie-style Vector & Particle Celebration Overlay when exercise is passed
+        PronunciationSuccessCelebrationOverlay(
+            celebrationState = celebrationState,
+            onReplayCelebration = { viewModel.replayCelebrationEffect() },
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
 
         // Bottom Result Evaluation Sheet
         PronunciationResultSheet(
@@ -528,8 +535,30 @@ fun SpeakingExerciseScreen(
             onContinue = { viewModel.onContinueNextExercise() },
             onRetry = { viewModel.retryCurrentExercise() },
             onWordClick = { word -> viewModel.speakWord(word) },
+            remainingLives = livesState.currentLives,
+            maxLives = livesState.maxLives,
+            onReplayFeedbackSound = {
+                if (result?.isPassed == true) {
+                    viewModel.replayCelebrationEffect()
+                } else {
+                    viewModel.replayLastFeedbackSound()
+                }
+            },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        // Modal Dialog when lives reach 0 and the level restarts
+        if (livesState.isLevelRestartedByZeroLives) {
+            LevelRestartedByZeroLivesDialog(
+                lastFailedResult = livesState.lastFailedResultBeforeRestart,
+                levelRestartCount = livesState.levelRestartCount,
+                onConfirmRestart = { viewModel.acknowledgeLevelRestart() },
+                onExitToMap = {
+                    viewModel.acknowledgeLevelRestart()
+                    viewModel.navigateTo(AppScreen.PATH_LEARN)
+                }
+            )
+        }
     }
 }
 

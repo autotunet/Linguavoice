@@ -67,6 +67,12 @@ class UserPreferencesRepository(context: Context) {
         return updated
     }
 
+    fun setHearts(hearts: Int) {
+        val clamped = hearts.coerceIn(0, 5)
+        prefs.edit().putInt("hearts", clamped).apply()
+        _userProfile.value = _userProfile.value.copy(hearts = clamped)
+    }
+
     fun refillHearts() {
         prefs.edit().putInt("hearts", 5).apply()
         _userProfile.value = _userProfile.value.copy(hearts = 5)
@@ -84,5 +90,25 @@ class UserPreferencesRepository(context: Context) {
         val newAvg = ((currentAvg * 4 + latestScore) / 5).coerceIn(0, 100)
         prefs.edit().putInt("accuracy_avg", newAvg).apply()
         _userProfile.value = _userProfile.value.copy(accuracyAverage = newAvg)
+    }
+
+    fun hasShownDailyStreakPopup(dateString: String): Boolean {
+        return prefs.getString("last_streak_popup_date", "") == dateString
+    }
+
+    fun markDailyStreakPopupShown(dateString: String) {
+        prefs.edit().putString("last_streak_popup_date", dateString).apply()
+    }
+
+    fun isStreakBannerHiddenForDate(dateString: String): Boolean {
+        return prefs.getString("streak_banner_hidden_date", "") == dateString
+    }
+
+    fun setStreakBannerHiddenForDate(dateString: String, hidden: Boolean) {
+        if (hidden) {
+            prefs.edit().putString("streak_banner_hidden_date", dateString).apply()
+        } else {
+            prefs.edit().remove("streak_banner_hidden_date").apply()
+        }
     }
 }

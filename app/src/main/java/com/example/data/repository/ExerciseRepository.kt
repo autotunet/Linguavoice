@@ -9,6 +9,12 @@ import com.example.data.model.LessonModule
 
 object ExerciseRepository {
 
+    fun getModulesGroupedByLevel(language: Language): Map<Int, List<LessonModule>> {
+        return getModulesForLanguage(language)
+            .groupBy { it.requiredLevel }
+            .toSortedMap()
+    }
+
     fun getModulesForLanguage(language: Language): List<LessonModule> {
         val exercises = getExercisesForLanguage(language)
         return when (language) {
@@ -24,6 +30,16 @@ object ExerciseRepository {
                     exercises = exercises.filter { it.lessonId == "lesson_en_1" }
                 ),
                 LessonModule(
+                    id = "module_en_1_2",
+                    language = language,
+                    title = "Cortesía y Conversación Diaria",
+                    description = "Expresiones esenciales de bienestar y despedidas cordiales.",
+                    iconName = "waving_hand",
+                    requiredLevel = 1,
+                    totalExercises = 2,
+                    exercises = exercises.filter { it.lessonId == "lesson_en_1" }.takeLast(2)
+                ),
+                LessonModule(
                     id = "module_en_2",
                     language = language,
                     title = "En el Café y Restaurante",
@@ -32,6 +48,16 @@ object ExerciseRepository {
                     requiredLevel = 2,
                     totalExercises = 4,
                     exercises = exercises.filter { it.lessonId == "lesson_en_2" }
+                ),
+                LessonModule(
+                    id = "module_en_2_2",
+                    language = language,
+                    title = "Pedidos Especiales y Cuenta",
+                    description = "Personaliza tu orden y agradece el servicio en inglés.",
+                    iconName = "restaurant",
+                    requiredLevel = 2,
+                    totalExercises = 2,
+                    exercises = exercises.filter { it.lessonId == "lesson_en_2" }.takeLast(2)
                 ),
                 LessonModule(
                     id = "module_en_3",
@@ -44,6 +70,16 @@ object ExerciseRepository {
                     exercises = exercises.filter { it.lessonId == "lesson_en_3" }
                 ),
                 LessonModule(
+                    id = "module_en_3_2",
+                    language = language,
+                    title = "Transporte y Estaciones",
+                    description = "Compra boletos y consulta rutas hacia el centro.",
+                    iconName = "flight",
+                    requiredLevel = 3,
+                    totalExercises = 2,
+                    exercises = exercises.filter { it.lessonId == "lesson_en_3" }.takeLast(2)
+                ),
+                LessonModule(
                     id = "module_en_4",
                     language = language,
                     title = "Trabalenguas y Desafío Pro",
@@ -52,6 +88,16 @@ object ExerciseRepository {
                     requiredLevel = 4,
                     totalExercises = 3,
                     exercises = exercises.filter { it.lessonId == "lesson_en_4" }
+                ),
+                LessonModule(
+                    id = "module_en_4_2",
+                    language = language,
+                    title = "Agilidad Fonética Avanzada",
+                    description = "Entrena velocidad y precisión articular con trabalenguas.",
+                    iconName = "local_fire_department",
+                    requiredLevel = 4,
+                    totalExercises = 2,
+                    exercises = exercises.filter { it.lessonId == "lesson_en_4" }.takeLast(2)
                 )
             )
             Language.FRENCH -> listOf(

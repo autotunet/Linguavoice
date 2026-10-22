@@ -102,6 +102,8 @@ fun LinguaVoiceApp(
     val userLevelInfo by viewModel.userLevelInfo.collectAsState()
     val showLanguageDialog by viewModel.showLanguageDialog.collectAsState()
     val showHeartsDialog by viewModel.showHeartsDialog.collectAsState()
+    val showDailyStreakPopup by viewModel.showDailyStreakPopup.collectAsState()
+    val isStreakBannerHidden by viewModel.isStreakBannerHidden.collectAsState()
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -139,7 +141,9 @@ fun LinguaVoiceApp(
                 DuoTopBar(
                     userProfile = userProfile.copy(streakDays = streakInfo.currentStreak),
                     onLanguageClick = { viewModel.setLanguageDialogVisible(true) },
-                    onHeartsClick = { viewModel.setHeartsDialogVisible(true) }
+                    onHeartsClick = { viewModel.setHeartsDialogVisible(true) },
+                    onStreakClick = { viewModel.openDailyStreakPopup() },
+                    levelInfo = userLevelInfo
                 )
             }
         },
@@ -150,7 +154,15 @@ fun LinguaVoiceApp(
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
+                    val screenBannerAdUnitId = when (currentScreen) {
+                        AppScreen.PATH_LEARN -> com.example.ads.AdMobManager.AD_UNIT_ID_1
+                        AppScreen.FREE_PRACTICE -> com.example.ads.AdMobManager.AD_UNIT_ID_2
+                        AppScreen.DIALOGUE -> com.example.ads.AdMobManager.AD_UNIT_ID_3
+                        AppScreen.PROFILE -> com.example.ads.AdMobManager.AD_UNIT_ID_4
+                        AppScreen.EXERCISE_SESSION -> com.example.ads.AdMobManager.AD_UNIT_ID_5
+                    }
                     com.example.ads.AdMobBanner(
+                        adUnitId = screenBannerAdUnitId,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 2.dp)
@@ -184,6 +196,9 @@ fun LinguaVoiceApp(
                         userProfile = userProfile,
                         streakInfo = streakInfo,
                         levelInfo = userLevelInfo,
+                        isStreakBannerHidden = isStreakBannerHidden,
+                        onHideStreakBanner = { viewModel.setStreakBannerHidden(true) },
+                        onOpenStreakPopup = { viewModel.openDailyStreakPopup() },
                         onStartLesson = { module -> viewModel.startLesson(module) }
                     )
                 }
@@ -227,6 +242,15 @@ fun LinguaVoiceApp(
                 }
             }
         }
+    }
+
+    // Emergent Once-Per-Day Streak Popup
+    if (showDailyStreakPopup) {
+        com.example.ui.components.StreakDetailDialog(
+            streakInfo = streakInfo,
+            onDismiss = { viewModel.dismissDailyStreakPopup(hideBannerToo = false) },
+            onDismissAndHideBanner = { viewModel.dismissDailyStreakPopup(hideBannerToo = true) }
+        )
     }
 
     // Dialogs
