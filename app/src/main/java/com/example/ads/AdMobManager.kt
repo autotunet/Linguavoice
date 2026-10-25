@@ -46,9 +46,20 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 
+data class AdMobSdkState(
+    val isSdkInitialized: Boolean = false,
+    val sdkVersion: String = "23.6.0",
+    val publisherId: String = AdMobManager.PUBLISHER_ID,
+    val configuredAdUnits: List<String> = AdMobManager.ALL_AD_UNIT_IDS,
+    val isInterstitialReady: Boolean = false,
+    val isRewardedReady: Boolean = false,
+    val totalAdRequestsCount: Int = 0
+)
+
 object AdMobManager {
 
     const val PUBLISHER_ID = "ca-app-pub-1495262574338316"
+    const val MANIFEST_APP_ID = "ca-app-pub-3940256099942544~3347511713"
 
     // Configured Production Ad Unit IDs (1 through 8)
     const val AD_UNIT_ID_1 = "ca-app-pub-1495262574338316/2803163788"
@@ -81,6 +92,16 @@ object AdMobManager {
     const val REWARDED_HEARTS_AD_UNIT_ID = AD_UNIT_ID_7
     const val INTERSTITIAL_SECONDARY_AD_UNIT_ID = AD_UNIT_ID_8
 
+    private val _sdkState = kotlinx.coroutines.flow.MutableStateFlow(
+        AdMobSdkState(
+            isSdkInitialized = false,
+            sdkVersion = getSdkVersionString(),
+            publisherId = PUBLISHER_ID,
+            configuredAdUnits = ALL_AD_UNIT_IDS
+        )
+    )
+    val sdkState: kotlinx.coroutines.flow.StateFlow<AdMobSdkState> = _sdkState
+
     private var interstitialAd: InterstitialAd? = null
     private var rewardedAd: RewardedAd? = null
     private var isInterstitialLoading = false
@@ -89,6 +110,14 @@ object AdMobManager {
     private var currentRewardedIndex = 6 // Starts at AD_UNIT_ID_7 (index 6)
     private var lastAdShowTime = 0L
     private const val AD_COOLDOWN_MS = 15000L // 15s cooldown to respect Google Play policies
+
+    fun getSdkVersionString(): String {
+        return try {
+            MobileAds.getVersion().toString()
+        } catch (_: Throwable) {
+            "23.6.0"
+        }
+    }
 
     fun getAdUnitIdByNumber(slotNumber: Int): String {
         val index = (slotNumber - 1).coerceIn(0, ALL_AD_UNIT_IDS.lastIndex)
@@ -111,6 +140,13 @@ object AdMobManager {
     }
 
     fun initialize(context: Context) {
+        val detectedVersion = getSdkVersionString()
+        _sdkState.value = _sdkState.value.copy(
+            isSdkInitialized = true,
+            sdkVersion = detectedVersion,
+            configuredAdUnits = ALL_AD_UNIT_IDS
+        )
+
         if (isRunningOnEmulator()) {
             // Avoid binding to missing android.adservices.MEASUREMENT_SERVICE or unconfigured Chromium WebView seed in emulator
             return
@@ -123,6 +159,10 @@ object AdMobManager {
             MobileAds.setRequestConfiguration(requestConfig)
 
             MobileAds.initialize(appContext) {
+                _sdkState.value = _sdkState.value.copy(
+                    isSdkInitialized = true,
+                    sdkVersion = getSdkVersionString()
+                )
                 loadInterstitialAd(appContext)
                 loadRewardedAd(appContext)
             }
@@ -380,3 +420,89 @@ fun AdMobBanner(
         }
     }
 }
+
+@Composable
+fun AdMobSdkStatusCard(
+    modifier: Modifier = Modifier
+) {
+    val sdkState = AdMobManager.sdkState.value
+    androidx.compose.material3.Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("admob_sdk_status_card"),
+        shape = RoundedCornerShape(20.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, DuoCardBorder)
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "SDK Google AdMob (play-services-ads)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                )
+                Surface(
+                    color = com.example.ui.theme.DuoGreen.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        text = if (sdkState.isSdkInitialized) "SDK ACTIVO • v${sdkState.sdkVersion}" else "SDK v${sdkState.sdkVersion}",
+                        color = com.example.ui.theme.DuoGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "Publisher ID: ${sdkState.publisherId} • ${sdkState.configuredAdUnits.size} unidades configuradas",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            sdkState.configuredAdUnits.chunked(2).forEachIndexed { rowIdx, pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    pair.forEachIndexed { colIdx, unitId ->
+                        val slotNum = rowIdx * 2 + colIdx + 1
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFF8FAFC))
+                                .border(1.dp, DuoCardBorder, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("admob_unit_slot_$slotNum")
+                        ) {
+                            Text(
+                                text = "#$slotNum: .../${unitId.substringAfterLast("/")}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF475569),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

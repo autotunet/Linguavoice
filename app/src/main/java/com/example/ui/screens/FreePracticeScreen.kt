@@ -165,6 +165,7 @@ fun FreePracticeScreen(
         items(filteredList) { exercise ->
             PracticeExerciseCard(
                 exercise = exercise,
+                spokenLanguage = userProfile.spokenLanguage,
                 onPlay = { onPlayAudio(exercise.targetPhrase) },
                 onPractice = { onSelectExercise(exercise) }
             )
@@ -179,9 +180,11 @@ fun FreePracticeScreen(
 @Composable
 fun PracticeExerciseCard(
     exercise: Exercise,
+    spokenLanguage: com.example.data.model.SpokenLanguage = com.example.data.model.SpokenLanguage.SPANISH,
     onPlay: () -> Unit,
     onPractice: () -> Unit
 ) {
+    val strings = com.example.ui.theme.LocalAppStrings.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -204,7 +207,7 @@ fun PracticeExerciseCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = exercise.promptQuestion,
+                        text = exercise.getLocalizedPromptQuestion(spokenLanguage),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = DuoPurple
@@ -224,7 +227,7 @@ fun PracticeExerciseCard(
                         modifier = Modifier.padding(top = 2.dp)
                     )
                     Text(
-                        text = exercise.translation,
+                        text = exercise.getLocalizedTranslation(spokenLanguage),
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp)
@@ -271,7 +274,7 @@ fun PracticeExerciseCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 DuoButton(
-                    text = "Escuchar",
+                    text = strings.listenNativeBtn,
                     onClick = onPlay,
                     modifier = Modifier.weight(1f),
                     colorStyle = DuoButtonColor.WHITE,
@@ -287,7 +290,7 @@ fun PracticeExerciseCard(
                 )
 
                 DuoButton(
-                    text = "Hablar",
+                    text = strings.startLessonBtn,
                     onClick = onPractice,
                     modifier = Modifier.weight(1.3f),
                     colorStyle = DuoButtonColor.GREEN,

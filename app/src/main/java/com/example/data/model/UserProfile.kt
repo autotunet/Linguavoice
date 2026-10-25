@@ -1,7 +1,9 @@
 package com.example.data.model
 
 data class UserProfile(
+    val spokenLanguage: SpokenLanguage = SpokenLanguage.SPANISH,
     val selectedLanguage: Language = Language.ENGLISH,
+    val hasConfiguredLanguagePair: Boolean = false,
     val streakDays: Int = 4,
     val totalXp: Int = 340,
     val gems: Int = 180,

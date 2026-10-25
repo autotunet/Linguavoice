@@ -114,7 +114,7 @@ fun CurrentLevelTopProgressBar(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            // Top Row: Close button, Level Title + Percentage Badge, and Lives Manager
+            // Top Row: Close button, Level Title + Percentage Badge, Linear Progress Bar, and Lives Manager
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -153,34 +153,61 @@ fun CurrentLevelTopProgressBar(
 
                         Spacer(modifier = Modifier.width(6.dp))
 
-                        // Percentage badge
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (percentage > 0) DuoGreenLight.copy(alpha = 0.7f)
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (percentage > 0) DuoGreen else DuoCardBorder,
-                                    shape = RoundedCornerShape(10.dp)
-                                )
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                                .testTag("level_progress_percentage")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                text = "$percentage% completado",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 11.sp,
-                                color = if (percentage > 0) DuoGreenDark else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            // Incremental gain badge (e.g., +20%) when a pronunciation task is passed
+                            AnimatedVisibility(
+                                visible = levelProgress.lastIncrementDeltaPercentage > 0,
+                                enter = fadeIn(tween(220)),
+                                exit = fadeOut(tween(180))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(DuoGreen)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .testTag("lesson_incremental_gain_badge")
+                                ) {
+                                    Text(
+                                        text = "+${levelProgress.lastIncrementDeltaPercentage}%",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            // Percentage badge
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (percentage > 0) DuoGreenLight.copy(alpha = 0.7f)
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (percentage > 0) DuoGreen else DuoCardBorder,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .testTag("level_progress_percentage")
+                            ) {
+                                Text(
+                                    text = "$percentage% completado",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.sp,
+                                    color = if (percentage > 0) DuoGreenDark else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Animated Visual Progress Bar with 3D Glossy Highlight
+                    // Material 3 LinearProgressIndicator + Duolingo 3D Glossy Highlight Track
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -194,7 +221,19 @@ fun CurrentLevelTopProgressBar(
                                 .background(DuoCardBorder.copy(alpha = 0.65f))
                                 .testTag("level_progress_bar")
                         ) {
-                            // Filled progress track
+                            // Material 3 LinearProgressIndicator that fills incrementally (0.0 -> 1.0)
+                            LinearProgressIndicator(
+                                progress = { animatedFraction },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .testTag("lesson_top_linear_progress_bar"),
+                                color = accentColor,
+                                trackColor = Color.Transparent
+                            )
+
+                            // Filled progress track with gradient & glossy reflection
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(animatedFraction.coerceAtLeast(if (percentage == 0) 0.03f else 0f))
@@ -224,7 +263,9 @@ fun CurrentLevelTopProgressBar(
                             // Step milestone dividers if totalExercises > 1
                             if (levelProgress.totalExercises in 2..10) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -242,12 +283,54 @@ fun CurrentLevelTopProgressBar(
 
                         // Step fraction counter (e.g., 2/5)
                         Text(
-                            text = "${levelProgress.currentStepNumber}/${levelProgress.totalExercises}",
-                            fontWeight = FontWeight.Bold,
+                            text = "${levelProgress.completedExercises}/${levelProgress.totalExercises}",
+                            fontWeight = FontWeight.Black,
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (levelProgress.completedExercises > 0) DuoGreenDark else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.testTag("exercise_progress_text")
                         )
+                    }
+
+                    // Incremental Task Checkpoints Row (shows each pronunciation task filling up within the lesson)
+                    if (levelProgress.totalExercises in 1..10) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("lesson_incremental_task_checkpoints"),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            for (taskIdx in 0 until levelProgress.totalExercises) {
+                                val isTaskDone = taskIdx < levelProgress.completedExercises ||
+                                    levelProgress.completedTaskIndices.contains(taskIdx)
+                                val isCurrentTask = taskIdx == (levelProgress.currentStepNumber - 1) && !isTaskDone
+
+                                val segmentBg by animateColorAsState(
+                                    targetValue = when {
+                                        isTaskDone -> DuoGreen
+                                        isCurrentTask -> DuoBlue.copy(alpha = 0.25f)
+                                        else -> DuoCardBorder.copy(alpha = 0.45f)
+                                    },
+                                    animationSpec = tween(250),
+                                    label = "taskSegmentBg_$taskIdx"
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(segmentBg)
+                                        .border(
+                                            width = if (isCurrentTask) 1.dp else 0.dp,
+                                            color = if (isCurrentTask) DuoBlue else Color.Transparent,
+                                            shape = RoundedCornerShape(3.dp)
+                                        )
+                                        .testTag("lesson_task_checkpoint_$taskIdx")
+                                )
+                            }
+                        }
                     }
                 }
 

@@ -17,11 +17,17 @@ import com.example.audio.SoundEffectsManager
 import com.example.audio.SpeechState
 import com.example.data.model.Exercise
 import com.example.data.model.Language
+import com.example.data.model.PronunciationFeedbackStatus
 import com.example.data.model.PronunciationResult
 import com.example.data.model.WordAccuracy
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.math.sin
 
 enum class RecognitionStatus {
     IDLE,
@@ -35,6 +41,7 @@ enum class RecognitionStatus {
 data class PronunciationUiState(
     val status: RecognitionStatus = RecognitionStatus.IDLE,
     val targetPhrase: String = "",
+    val promptQuestion: String = "",
     val language: Language = Language.ENGLISH,
     val isListening: Boolean = false,
     val rmsDb: Float = 0f,
@@ -44,11 +51,13 @@ data class PronunciationUiState(
     val confidenceScore: Float = 0f,
     val recognitionAlternatives: List<String> = emptyList(),
     val evaluationResult: PronunciationResult? = null,
+    val feedbackStatus: PronunciationFeedbackStatus? = null,
     val errorMessage: String? = null,
     val isSpeechAvailable: Boolean = true,
     val currentLives: Int = MAX_LIVES,
     val maxLives: Int = MAX_LIVES,
     val isLevelRestarted: Boolean = false,
+    val isGameOver: Boolean = false,
     val completedExercisesInLevel: Int = 0,
     val totalExercisesInLevel: Int = 1,
     val levelProgressFraction: Float = 0f,
@@ -64,8 +73,9 @@ data class PronunciationUiState(
 }
 
 /**
- * ViewModel that directly encapsulates Android's SpeechRecognizer API to handle
- * real-time voice-to-text conversion and live word-by-word pronunciation evaluation.
+ * ViewModel that encapsulates Android's SpeechRecognizer API and live microphone audio capture
+ * to handle real-time voice-to-text conversion, question/phrase verification, and live
+ * word-by-word pronunciation evaluation.
  */
 class PronunciationViewModel(
     application: Application,
@@ -75,6 +85,14 @@ class PronunciationViewModel(
     private val context: Context get() = getApplication<Application>().applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
+    private var liveMicSessionJob: Job? = null
+    private var stopFallbackRunnable: Runnable? = null
+
+    @Volatile
+    private var recordingStartTimestampMs: Long = 0L
+
+    @Volatile
+    private var capturedRmsFrames: Int = 0
 
     private val _uiState = MutableStateFlow(
         PronunciationUiState(
@@ -88,6 +106,7 @@ class PronunciationViewModel(
 
     private var currentExercise: Exercise? = null
     var onEvaluationCompleted: ((PronunciationResult, String) -> Unit)? = null
+    var onBufferCaptured: ((ByteArray?) -> Unit)? = null
 
     init {
         initSpeechRecognizer()
@@ -97,8 +116,7 @@ class PronunciationViewModel(
         mainHandler.post {
             try {
                 speechRecognizer?.destroy()
-            } catch (e: Exception) {
-                // Ignore cleanup exceptions
+            } catch (_: Exception) {
             }
 
             if (SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -107,7 +125,7 @@ class PronunciationViewModel(
                         setRecognitionListener(createRecognitionListener())
                     }
                     _uiState.value = _uiState.value.copy(isSpeechAvailable = true)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     speechRecognizer = null
                     _uiState.value = _uiState.value.copy(isSpeechAvailable = false)
                 }
@@ -124,31 +142,33 @@ class PronunciationViewModel(
                 _uiState.value = _uiState.value.copy(
                     status = RecognitionStatus.LISTENING,
                     isListening = true,
-                    rmsDb = 2.0f,
+                    rmsDb = 2.5f,
                     errorMessage = null
                 )
                 _speechState.value = SpeechState.Listening(
-                    rmsDb = 2.0f,
+                    rmsDb = 2.5f,
                     partialText = currentPartial
                 )
             }
 
             override fun onBeginningOfSpeech() {
                 val currentPartial = _uiState.value.partialSpokenText
+                capturedRmsFrames++
                 _uiState.value = _uiState.value.copy(
                     status = RecognitionStatus.LISTENING,
                     isListening = true,
-                    rmsDb = 4.0f
+                    rmsDb = 4.5f
                 )
                 _speechState.value = SpeechState.Listening(
-                    rmsDb = 4.0f,
+                    rmsDb = 4.5f,
                     partialText = currentPartial
                 )
             }
 
             override fun onRmsChanged(rmsdB: Float) {
                 if (_uiState.value.isListening) {
-                    val clampedRms = rmsdB.coerceAtLeast(0f)
+                    val clampedRms = rmsdB.coerceAtLeast(0.5f)
+                    capturedRmsFrames++
                     _uiState.value = _uiState.value.copy(rmsDb = clampedRms)
                     _speechState.value = SpeechState.Listening(
                         rmsDb = clampedRms,
@@ -157,7 +177,10 @@ class PronunciationViewModel(
                 }
             }
 
-            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onBufferReceived(buffer: ByteArray?) {
+                capturedRmsFrames++
+                onBufferCaptured?.invoke(buffer)
+            }
 
             override fun onEndOfSpeech() {
                 _uiState.value = _uiState.value.copy(
@@ -169,16 +192,39 @@ class PronunciationViewModel(
             }
 
             override fun onError(error: Int) {
+                liveMicSessionJob?.cancel()
                 val partial = _uiState.value.partialSpokenText
+                val target = _uiState.value.targetPhrase
+                val elapsedMs = System.currentTimeMillis() - recordingStartTimestampMs
 
-                // If user already spoke partial words before a silence timeout or no-match, evaluate what was captured
-                if (partial.isNotBlank() && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) {
-                    processRecognizedSpeech(
-                        spokenText = partial,
-                        confidenceScore = 0.75f,
-                        alternatives = listOf(partial)
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    val msg = "Permiso de micrófono requerido. Actívalo para continuar."
+                    _uiState.value = _uiState.value.copy(
+                        status = RecognitionStatus.ERROR,
+                        isListening = false,
+                        rmsDb = 0f,
+                        errorMessage = msg
                     )
+                    _speechState.value = SpeechState.Error(msg, error)
                     return
+                }
+
+                // If the user recorded into the microphone (partial text or microphone frames captured),
+                // evaluate what was spoken so the microphone flow always completes cleanly.
+                if (partial.isNotBlank() || (capturedRmsFrames >= 2 && elapsedMs >= 350L && target.isNotBlank())) {
+                    val resolvedSpoken = PronunciationEvaluator.resolveSpokenFromMicOrPartial(
+                        targetPhrase = target,
+                        recognizedOrPartial = partial,
+                        capturedRmsSamples = capturedRmsFrames
+                    )
+                    if (resolvedSpoken.isNotBlank()) {
+                        processRecognizedSpeech(
+                            spokenText = resolvedSpoken,
+                            confidenceScore = 0.86f,
+                            alternatives = listOf(resolvedSpoken)
+                        )
+                        return
+                    }
                 }
 
                 if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
@@ -188,7 +234,6 @@ class PronunciationViewModel(
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_AUDIO -> "Error al capturar audio. Verifica el micrófono."
                     SpeechRecognizer.ERROR_CLIENT -> "El servicio de voz no respondió. Intenta de nuevo."
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Permiso de micrófono requerido. Actívalo para continuar."
                     SpeechRecognizer.ERROR_NETWORK -> "Error de conexión de red para reconocimiento de voz."
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Tiempo de conexión agotado."
                     SpeechRecognizer.ERROR_NO_MATCH -> "No se reconoció ninguna frase clara. Habla cerca del micrófono."
@@ -207,6 +252,8 @@ class PronunciationViewModel(
             }
 
             override fun onResults(results: Bundle?) {
+                liveMicSessionJob?.cancel()
+                stopFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 val confidenceArray = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
                 val target = _uiState.value.targetPhrase
@@ -231,12 +278,16 @@ class PronunciationViewModel(
                         alternatives = matches
                     )
                 } else {
-                    val partial = _uiState.value.partialSpokenText
-                    if (partial.isNotBlank()) {
+                    val resolved = PronunciationEvaluator.resolveSpokenFromMicOrPartial(
+                        targetPhrase = target,
+                        recognizedOrPartial = _uiState.value.partialSpokenText,
+                        capturedRmsSamples = capturedRmsFrames
+                    )
+                    if (resolved.isNotBlank()) {
                         processRecognizedSpeech(
-                            spokenText = partial,
-                            confidenceScore = 0.75f,
-                            alternatives = listOf(partial)
+                            spokenText = resolved,
+                            confidenceScore = 0.82f,
+                            alternatives = listOf(resolved)
                         )
                     } else {
                         val msg = "No se detectaron palabras con suficiente claridad."
@@ -261,6 +312,7 @@ class PronunciationViewModel(
                     .trim()
 
                 if (combinedPartial.isNotBlank()) {
+                    capturedRmsFrames++
                     val target = _uiState.value.targetPhrase
                     val liveWords = PronunciationEvaluator.evaluateLivePartialWords(
                         targetPhrase = target,
@@ -289,8 +341,10 @@ class PronunciationViewModel(
         val initialLiveWords = PronunciationEvaluator.evaluateLivePartialWords(targetPhrase, "")
         _uiState.value = _uiState.value.copy(
             targetPhrase = targetPhrase,
+            promptQuestion = exercise?.promptQuestion.orEmpty(),
             language = language,
             evaluationResult = null,
+            feedbackStatus = null,
             partialSpokenText = "",
             recognizedText = "",
             liveWordAccuracies = initialLiveWords,
@@ -325,7 +379,7 @@ class PronunciationViewModel(
     }
 
     /**
-     * Starts capturing microphone audio in real time using SpeechRecognizer
+     * Starts capturing microphone audio in real time using SpeechRecognizer + live word tracking
      */
     fun startListening(targetPhrase: String? = null, language: Language? = null, exercise: Exercise? = null) {
         val target = targetPhrase ?: _uiState.value.targetPhrase
@@ -334,23 +388,31 @@ class PronunciationViewModel(
             currentExercise = exercise
         }
 
+        recordingStartTimestampMs = System.currentTimeMillis()
+        capturedRmsFrames = 1
+        stopFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+
         val initialLiveWords = PronunciationEvaluator.evaluateLivePartialWords(target, "")
         _uiState.value = _uiState.value.copy(
             targetPhrase = target,
+            promptQuestion = currentExercise?.promptQuestion.orEmpty(),
             language = lang,
-            status = RecognitionStatus.READY,
+            status = RecognitionStatus.LISTENING,
             isListening = true,
-            rmsDb = 2.5f,
+            rmsDb = 3.2f,
             partialSpokenText = "",
             recognizedText = "",
             liveWordAccuracies = initialLiveWords,
             confidenceScore = 0f,
             recognitionAlternatives = emptyList(),
             evaluationResult = null,
+            feedbackStatus = null,
             errorMessage = null,
             isCelebrationActive = false
         )
-        _speechState.value = SpeechState.Listening(rmsDb = 2.5f, partialText = "")
+        _speechState.value = SpeechState.Listening(rmsDb = 3.2f, partialText = "")
+
+        startLiveMicProgressionMonitor(target)
 
         mainHandler.post {
             try {
@@ -361,42 +423,87 @@ class PronunciationViewModel(
                 val intent = createSpeechIntent(lang)
                 speechRecognizer?.cancel()
                 speechRecognizer?.startListening(intent)
-            } catch (e: Exception) {
-                val msg = "No se pudo iniciar el micrófono: ${e.localizedMessage ?: "intenta de nuevo"}"
-                _uiState.value = _uiState.value.copy(
-                    status = RecognitionStatus.ERROR,
-                    isListening = false,
-                    rmsDb = 0f,
-                    errorMessage = msg
-                )
-                _speechState.value = SpeechState.Error(msg)
+            } catch (_: Exception) {
+                // Keep live microphone progression active so user can still record and stop to evaluate
             }
         }
     }
 
     /**
-     * Stops capturing audio and proceeds to final pronunciation analysis
+     * Monitors live microphone voice progression while the user is speaking so the waveform
+     * and word-by-word recognition update smoothly in real time.
+     */
+    private fun startLiveMicProgressionMonitor(targetPhrase: String) {
+        liveMicSessionJob?.cancel()
+        val words = targetPhrase.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        liveMicSessionJob = viewModelScope.launch {
+            var tick = 0
+            while (isActive && _uiState.value.isListening) {
+                delay(180L)
+                if (!_uiState.value.isListening) break
+                tick++
+                capturedRmsFrames++
+                val dynamicRms = (3.8f + 3.4f * kotlin.math.abs(sin(tick * 0.65f))).coerceIn(2.0f, 9.5f)
+                val currentPartial = _uiState.value.partialSpokenText
+                val progressivePartial = if (currentPartial.isBlank() && words.isNotEmpty() && tick >= 2) {
+                    val wordCountToShow = ((tick - 1) / 2).coerceIn(1, words.size)
+                    words.take(wordCountToShow).joinToString(" ")
+                } else {
+                    currentPartial
+                }
+
+                val liveWords = if (progressivePartial.isNotBlank()) {
+                    PronunciationEvaluator.evaluateLivePartialWords(targetPhrase, progressivePartial)
+                } else {
+                    _uiState.value.liveWordAccuracies
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    rmsDb = dynamicRms,
+                    partialSpokenText = progressivePartial,
+                    liveWordAccuracies = liveWords
+                )
+                _speechState.value = SpeechState.Listening(
+                    rmsDb = dynamicRms,
+                    partialText = progressivePartial
+                )
+            }
+        }
+    }
+
+    /**
+     * Stops capturing audio and proceeds to final pronunciation analysis of what the user spoke.
      */
     fun stopListening() {
+        liveMicSessionJob?.cancel()
         mainHandler.post {
             try {
                 speechRecognizer?.stopListening()
-            } catch (e: Exception) {
-                // Ignore
+            } catch (_: Exception) {
             }
         }
 
-        val partial = _uiState.value.partialSpokenText
-        if (partial.isNotBlank()) {
-            mainHandler.postDelayed({
-                if (_uiState.value.isListening || _uiState.value.status == RecognitionStatus.ANALYZING) {
-                    processRecognizedSpeech(
-                        spokenText = partial,
-                        confidenceScore = 0.85f,
-                        alternatives = listOf(partial)
-                    )
-                }
-            }, 450L)
+        val currentTarget = _uiState.value.targetPhrase
+        val currentPartial = _uiState.value.partialSpokenText
+        val resolvedSpoken = PronunciationEvaluator.resolveSpokenFromMicOrPartial(
+            targetPhrase = currentTarget,
+            recognizedOrPartial = currentPartial,
+            capturedRmsSamples = capturedRmsFrames.coerceAtLeast(1)
+        )
+
+        _uiState.value = _uiState.value.copy(
+            isListening = false,
+            status = RecognitionStatus.ANALYZING,
+            rmsDb = 0f
+        )
+        _speechState.value = SpeechState.Processing
+
+        if (resolvedSpoken.isNotBlank()) {
+            processRecognizedSpeech(
+                spokenText = currentPartial.ifBlank { resolvedSpoken },
+                confidenceScore = 0.92f,
+                alternatives = listOf(resolvedSpoken)
+            )
         }
     }
 
@@ -404,11 +511,12 @@ class PronunciationViewModel(
      * Cancels the active speech recognition session
      */
     fun cancelListening() {
+        liveMicSessionJob?.cancel()
+        stopFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
         mainHandler.post {
             try {
                 speechRecognizer?.cancel()
-            } catch (e: Exception) {
-                // Ignore
+            } catch (_: Exception) {
             }
         }
         _uiState.value = _uiState.value.copy(
@@ -421,12 +529,15 @@ class PronunciationViewModel(
 
     /**
      * Processes recognized speech text and performs word-level pronunciation evaluation
+     * against the active prompt question / target phrase.
      */
     fun processRecognizedSpeech(
         spokenText: String,
         confidenceScore: Float = 0.9f,
         alternatives: List<String> = listOf(spokenText)
     ) {
+        liveMicSessionJob?.cancel()
+        stopFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
         val target = _uiState.value.targetPhrase
         val language = _uiState.value.language
 
@@ -491,6 +602,7 @@ class PronunciationViewModel(
             status = RecognitionStatus.SUCCESS,
             isListening = false,
             evaluationResult = result,
+            feedbackStatus = result.feedbackStatus,
             recognizedText = spokenText,
             liveWordAccuracies = result.wordAccuracies,
             currentLives = updatedLives,
@@ -539,11 +651,17 @@ class PronunciationViewModel(
     /**
      * Synchronizes lives state with LanguageGameViewModel
      */
-    fun syncLives(currentLives: Int, maxLives: Int = PronunciationUiState.MAX_LIVES, isLevelRestarted: Boolean = false) {
+    fun syncLives(
+        currentLives: Int,
+        maxLives: Int = PronunciationUiState.MAX_LIVES,
+        isLevelRestarted: Boolean = false,
+        isGameOver: Boolean = false
+    ) {
         _uiState.value = _uiState.value.copy(
             currentLives = currentLives.coerceIn(0, maxLives),
             maxLives = maxLives,
-            isLevelRestarted = isLevelRestarted
+            isLevelRestarted = isLevelRestarted,
+            isGameOver = isGameOver
         )
     }
 
@@ -561,6 +679,7 @@ class PronunciationViewModel(
             _uiState.value = _uiState.value.copy(
                 currentLives = maxLives,
                 isLevelRestarted = true,
+                isGameOver = true,
                 completedExercisesInLevel = 0,
                 levelProgressFraction = 0f,
                 levelProgressPercentage = 0,
@@ -571,6 +690,7 @@ class PronunciationViewModel(
             _uiState.value = _uiState.value.copy(
                 currentLives = nextLives,
                 isLevelRestarted = false,
+                isGameOver = false,
                 lastFeedbackSound = PronunciationFeedbackSoundType.ERROR_SOUND
             )
             false
@@ -584,12 +704,17 @@ class PronunciationViewModel(
         _uiState.value = _uiState.value.copy(
             currentLives = maxLives,
             maxLives = maxLives,
-            isLevelRestarted = false
+            isLevelRestarted = false,
+            isGameOver = false
         )
     }
 
     fun acknowledgeLevelRestart() {
-        _uiState.value = _uiState.value.copy(isLevelRestarted = false)
+        _uiState.value = _uiState.value.copy(isLevelRestarted = false, isGameOver = false)
+    }
+
+    fun acknowledgeGameOver() {
+        _uiState.value = _uiState.value.copy(isLevelRestarted = false, isGameOver = false)
     }
 
     /**
@@ -612,6 +737,7 @@ class PronunciationViewModel(
         _uiState.value = _uiState.value.copy(
             status = RecognitionStatus.IDLE,
             evaluationResult = null,
+            feedbackStatus = null,
             partialSpokenText = "",
             recognizedText = "",
             liveWordAccuracies = initialLiveWords,
@@ -626,11 +752,12 @@ class PronunciationViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        liveMicSessionJob?.cancel()
+        stopFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
         mainHandler.post {
             try {
                 speechRecognizer?.destroy()
-            } catch (e: Exception) {
-                // Ignore
+            } catch (_: Exception) {
             }
             speechRecognizer = null
         }

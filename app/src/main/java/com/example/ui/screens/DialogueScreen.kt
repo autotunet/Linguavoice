@@ -61,9 +61,13 @@ import com.example.data.repository.ExerciseRepository
 import com.example.ui.components.CurrentLevelTopProgressBar
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
+import com.example.ui.components.GameOverDialog
 import com.example.ui.components.LevelRestartedByZeroLivesDialog
 import com.example.ui.components.LivesBarIndicator
+import com.example.ui.components.LivesCounterComponent
 import com.example.ui.components.MascotBubble
+import com.example.ui.components.MicrophoneRecognitionVerificationCard
+import com.example.ui.components.NativeWaveformComparisonCard
 import com.example.ui.components.PronunciationResultSheet
 import com.example.ui.components.PronunciationSuccessCelebrationOverlay
 import com.example.ui.components.PulsingMicHalo
@@ -92,6 +96,7 @@ fun DialogueScreen(
     val livesState by viewModel.livesState.collectAsState()
     val levelProgress by viewModel.levelProgressState.collectAsState()
     val celebrationState by viewModel.celebrationState.collectAsState()
+    val nativeComparisonState by viewModel.nativeAudioComparisonState.collectAsState()
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -225,7 +230,19 @@ fun DialogueScreen(
                     closeButtonTestTag = "dialogue_close_button"
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Dedicated 'Lives' counter component at the top of the UI
+                LivesCounterComponent(
+                    currentLives = livesState.currentLives,
+                    maxLives = livesState.maxLives,
+                    accuracyThreshold = livesState.accuracyThreshold,
+                    lastScorePercentage = result?.scorePercentage,
+                    onLivesClick = { viewModel.setHeartsDialogVisible(true) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Chat Messages List
                 LazyColumn(
@@ -328,6 +345,63 @@ fun DialogueScreen(
                             }
                         }
                     }
+                }
+
+                // Native Speaker Audio File (.wav) & Waveform Comparison for the expected reply
+                NativeWaveformComparisonCard(
+                    comparisonState = nativeComparisonState,
+                    isUserListening = isListening,
+                    liveRmsDb = rmsDb,
+                    onPlayNativeAudio = { speed -> viewModel.playNativeReferenceAudio(speed) },
+                    onStopNativeAudio = { viewModel.stopNativeReferenceAudio() },
+                    onStartUserRecording = { startDialogueMicWithPermission() },
+                    onPlayUserAudio = { viewModel.playUserRecordedAudio() },
+                    onStopUserAudio = { viewModel.stopUserRecordedAudio() },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                currentTurn?.let { turn ->
+                    if (!turn.expectedUserReply.isNullOrBlank()) {
+                        MicrophoneRecognitionVerificationCard(
+                            appPromptOrQuestion = "${turn.avatarName}: «${turn.targetText}»",
+                            expectedTargetWords = turn.expectedUserReply,
+                            recognizedSpokenText = pronunciationState.recognizedText.ifBlank { partialText },
+                            isListening = isListening,
+                            evaluationStatus = result?.feedbackStatus ?: pronunciationState.feedbackStatus,
+                            scorePercentage = result?.scorePercentage,
+                            isPlayingUserAudio = nativeComparisonState.isPlayingUserAudio,
+                            onPlayUserAudio = { viewModel.playUserRecordedAudio() },
+                            onStopUserAudio = { viewModel.stopUserRecordedAudio() },
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
+
+                result?.let { evalResult ->
+                    com.example.ui.components.PronunciationAccuracyMotivationalFeedback(
+                        result = evalResult,
+                        onWordClick = { word -> viewModel.speakWord(word) },
+                        onListenTargetClick = { viewModel.playCurrentDialogueTurnAiVoice() },
+                        onRetryClick = { viewModel.retryCurrentExercise() },
+                        onReplayMotivationalAnimation = {
+                            if (evalResult.isPassed) {
+                                viewModel.replayCelebrationEffect()
+                            } else {
+                                viewModel.replayLastFeedbackSound()
+                            }
+                        },
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    com.example.ui.components.PronunciationScoreComparisonCard(
+                        result = evalResult,
+                        isPlayingUserAudio = nativeComparisonState.isPlayingUserAudio,
+                        onListenTargetClick = { viewModel.playCurrentDialogueTurnAiVoice() },
+                        onPlayUserAudioClick = { viewModel.playUserRecordedAudio() },
+                        onStopUserAudioClick = { viewModel.stopUserRecordedAudio() },
+                        onWordClick = { word -> viewModel.speakWord(word) },
+                        onRetryClick = { viewModel.retryCurrentExercise() },
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                 }
 
                 // Waveform & Mic Bar in dialogue
@@ -446,16 +520,16 @@ fun DialogueScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .border(1.5.dp, DuoCardBorder, RoundedCornerShape(12.dp))
-                                .background(Color.White)
+                                .border(1.5.dp, DuoGreen.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF2FCE8))
                                 .clickable { viewModel.simulateSpeakingDemo(expected) }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .padding(horizontal = 6.dp, vertical = 8.dp)
                                 .testTag("dialogue_demo_speech_button"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "⚡ Demo OK",
+                                text = "✓ Correcta",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2E7D32)
@@ -466,16 +540,36 @@ fun DialogueScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
+                                .border(1.5.dp, DuoOrange.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .background(Color(0xFFFFF8E1))
+                                .clickable { viewModel.simulateAlmostCorrectPronunciation() }
+                                .padding(horizontal = 6.dp, vertical = 8.dp)
+                                .testTag("dialogue_almost_speech_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "≈ Casi",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB78103)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
                                 .border(1.5.dp, DuoRed.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                                 .background(Color(0xFFFFF5F5))
                                 .clickable { viewModel.simulatePronunciationError() }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .padding(horizontal = 6.dp, vertical = 8.dp)
                                 .testTag("dialogue_error_speech_button"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "💔 Error (-1)",
+                                text = "✕ Error",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = DuoRed
@@ -510,15 +604,13 @@ fun DialogueScreen(
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
 
-            if (livesState.isLevelRestartedByZeroLives) {
-                LevelRestartedByZeroLivesDialog(
-                    lastFailedResult = livesState.lastFailedResultBeforeRestart,
+            if (livesState.isGameOver || livesState.isLevelRestartedByZeroLives) {
+                GameOverDialog(
+                    lastFailedResult = livesState.lastFailedResultBeforeRestart ?: result,
                     levelRestartCount = livesState.levelRestartCount,
-                    onConfirmRestart = { viewModel.acknowledgeLevelRestart() },
-                    onExitToMap = {
-                        viewModel.acknowledgeLevelRestart()
-                        viewModel.navigateTo(AppScreen.PATH_LEARN)
-                    }
+                    accuracyThreshold = livesState.accuracyThreshold,
+                    onConfirmRestart = { viewModel.restartLevelFromGameOver() },
+                    onExitToMap = { viewModel.exitGameOverToMap() }
                 )
             }
         }

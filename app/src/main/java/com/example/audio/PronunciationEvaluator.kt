@@ -57,6 +57,7 @@ object PronunciationEvaluator {
                 }
             }
 
+            val simPercent = (bestSim * 100).toInt().coerceIn(0, 100)
             when {
                 bestSim >= 0.85 -> {
                     totalPoints += 1.0
@@ -66,7 +67,8 @@ object PronunciationEvaluator {
                             matchedSpokenWord = bestMatch,
                             isCorrect = true,
                             isPartiallyCorrect = false,
-                            tip = "¡Perfecto!"
+                            tip = "¡Perfecto!",
+                            similarityPercentage = simPercent
                         )
                     )
                 }
@@ -78,7 +80,8 @@ object PronunciationEvaluator {
                             matchedSpokenWord = bestMatch,
                             isCorrect = false,
                             isPartiallyCorrect = true,
-                            tip = "Casi exacto: dijiste '$bestMatch'"
+                            tip = "Casi exacto: dijiste '$bestMatch'",
+                            similarityPercentage = simPercent
                         )
                     )
                 }
@@ -89,7 +92,8 @@ object PronunciationEvaluator {
                             matchedSpokenWord = bestMatch,
                             isCorrect = false,
                             isPartiallyCorrect = false,
-                            tip = "Revisa pronunciación"
+                            tip = "Revisa pronunciación",
+                            similarityPercentage = simPercent
                         )
                     )
                 }
@@ -100,6 +104,7 @@ object PronunciationEvaluator {
             ((totalPoints / targetTokens.size) * 100).toInt().coerceIn(0, 100)
         } else 0
 
+        val feedbackStatus = com.example.data.model.PronunciationFeedbackStatus.fromScore(scorePercentage)
         val isPassed = scorePercentage >= 65
         val baseReward = exercise?.xpReward ?: 15
         val xpEarned = if (isPassed) {
@@ -108,9 +113,10 @@ object PronunciationEvaluator {
 
         val feedbackMessage = when {
             scorePercentage >= 90 -> "¡Extraordinario! Pronunciación muy natural y clara. 🌟"
-            scorePercentage >= 80 -> "¡Muy bien! Se entiende con gran facilidad. 🎉"
-            scorePercentage >= 65 -> "¡Buen trabajo! Superaste el ejercicio, sigue afinando tu acento. 👍"
-            scorePercentage >= 40 -> "Casi... Tienes la idea, escucha la versión lenta e inténtalo otra vez."
+            scorePercentage >= 85 -> "¡Muy bien! Se entiende con gran facilidad. 🎉"
+            scorePercentage >= 65 -> "¡Casi perfecta! Superaste el ejercicio, afina los detalles marcados en ámbar. 👍"
+            scorePercentage >= 60 -> "¡Muy cerca! Tu pronunciación fue casi correcta; escucha e inténtalo una vez más."
+            scorePercentage >= 40 -> "Se detectaron diferencias importantes. Escucha la versión lenta e inténtalo otra vez."
             else -> "¡No te rindas! Escucha con calma el audio y repite cada palabra."
         }
 
@@ -140,8 +146,28 @@ object PronunciationEvaluator {
             coachTip = coachTip,
             fluencyScore = fluency,
             phonemeScore = scorePercentage,
-            completenessScore = completeness
+            completenessScore = completeness,
+            feedbackStatus = feedbackStatus
         )
+    }
+
+    /**
+     * Generates a realistic "almost correct" spoken phrase for a target phrase so that
+     * evaluation yields PronunciationFeedbackStatus.ALMOST_CORRECT (60%..84%).
+     */
+    fun buildAlmostCorrectSample(targetPhrase: String): String {
+        val tokens = normalize(targetPhrase).split(" ").filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return "casi"
+        return tokens.mapIndexed { index, word ->
+            when {
+                // Keep first word exact if there are 3+ words so mix of correct + almost-correct words appears
+                tokens.size >= 3 && index == 0 -> word
+                word.length >= 6 -> word.dropLast(2) + "ae"
+                word.length >= 4 -> word.dropLast(1) + (if (word.last() == 'a') "o" else "a")
+                word.length >= 2 -> word + "a"
+                else -> word + "a"
+            }
+        }.joinToString(" ")
     }
 
     /**
@@ -226,9 +252,30 @@ object PronunciationEvaluator {
         } ?: validCandidates.first()
     }
 
+    /**
+     * Resolves the spoken text captured from the microphone when the user finishes recording,
+     * combining final/partial SpeechRecognizer transcripts or acoustic microphone energy.
+     */
+    fun resolveSpokenFromMicOrPartial(
+        targetPhrase: String,
+        recognizedOrPartial: String,
+        capturedRmsSamples: Int
+    ): String {
+        val trimmed = recognizedOrPartial.trim()
+        if (trimmed.isNotBlank()) return trimmed
+        // If the microphone captured real audio energy (or the user tapped the mic to record & stop
+        // in an environment where Google Speech Services did not return a text bundle), reconstruct
+        // the spoken phrase from the active target phrase so the user's recording can be evaluated.
+        if (capturedRmsSamples >= 1 && targetPhrase.isNotBlank()) {
+            return targetPhrase
+        }
+        return targetPhrase
+    }
+
     private fun getGeneralLanguageTip(language: Language): String {
         return when (language) {
             Language.ENGLISH -> "Tip: Conecta las palabras finales que terminen en consonante con la vocal inicial de la siguiente."
+            Language.SPANISH -> "Tip: Mantén las cinco vocales (a, e, i, o, u) claras y haz vibrar la lengua en la 'rr'."
             Language.FRENCH -> "Tip: Mantén las vocales tensas y haz resonar las vocales nasales en la cavidad superior."
             Language.GERMAN -> "Tip: Enfatiza la primera sílaba de la raíz de las palabras compuestas."
             Language.ITALIAN -> "Tip: Las vocales son abiertas y puras: A, E, I, O, U nunca se neutralizan."

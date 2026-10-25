@@ -6,13 +6,18 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [PracticeDayEntity::class],
-    version = 2,
+    entities = [
+        PracticeDayEntity::class,
+        LanguagePreferenceEntity::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun practiceDayDao(): PracticeDayDao
+
+    abstract fun languagePreferenceDao(): LanguagePreferenceDao
 
     companion object {
         @Volatile
@@ -25,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "linguavoice_database"
                 )
+                    .allowMainThreadQueries()
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

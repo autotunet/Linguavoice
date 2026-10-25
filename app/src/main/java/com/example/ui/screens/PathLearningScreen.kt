@@ -62,20 +62,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.DifficultyTier
 import com.example.data.model.LessonModule
+import com.example.data.model.LevelSystem
 import com.example.data.model.UserLevelInfo
 import com.example.data.model.UserProfile
 import com.example.data.repository.ExerciseRepository
 import com.example.data.repository.StreakInfo
+import com.example.ui.components.DailyGoalCelebrationState
 import com.example.ui.components.DailyStreakCard
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
+import com.example.ui.components.DuolingoLessonItemCard
+import com.example.ui.components.DuolingoRewardChestCard
+import com.example.ui.components.DuolingoUnitBannerCard
 import com.example.ui.components.LevelRoadmapDialog
 import com.example.ui.components.LevelSectionHeaderCard
 import com.example.ui.components.MascotBubble
 import com.example.ui.components.Material3LessonCard
 import com.example.ui.components.Material3StreakCounterCard
+import com.example.ui.components.SectionGuidebookDialog
+import com.example.ui.components.UnitChestRewardDialog
 import com.example.ui.components.UserProgressSummaryCard
+import com.example.ui.components.UserStreakCalendarCard
 import com.example.ui.components.isLessonModuleCompleted
 import com.example.ui.theme.DuoCardBorder
 import com.example.ui.theme.DuoGreen
@@ -95,18 +104,24 @@ fun PathLearningScreen(
     userProfile: UserProfile,
     streakInfo: StreakInfo,
     levelInfo: UserLevelInfo,
+    dailyGoalState: DailyGoalCelebrationState = DailyGoalCelebrationState(),
+    onSelectDailyGoalXp: (Int) -> Unit = {},
+    onTriggerDailyGoalCelebration: () -> Unit = {},
     isStreakBannerHidden: Boolean = false,
     onHideStreakBanner: () -> Unit = {},
     onOpenStreakPopup: () -> Unit = {},
+    personalizedModules: List<LessonModule>? = null,
+    personalizedModulesByLevel: Map<Int, List<LessonModule>>? = null,
+    onOpenLanguageSelection: () -> Unit = {},
     onStartLesson: (LessonModule) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val modules = remember(userProfile.selectedLanguage) {
-        ExerciseRepository.getModulesForLanguage(userProfile.selectedLanguage)
+    val modules = remember(userProfile.selectedLanguage, personalizedModules) {
+        personalizedModules ?: ExerciseRepository.getModulesForLanguage(userProfile.selectedLanguage)
     }
 
-    val modulesByLevel = remember(userProfile.selectedLanguage) {
-        ExerciseRepository.getModulesGroupedByLevel(userProfile.selectedLanguage)
+    val modulesByLevel = remember(userProfile.selectedLanguage, personalizedModulesByLevel) {
+        personalizedModulesByLevel ?: ExerciseRepository.getModulesGroupedByLevel(userProfile.selectedLanguage)
     }
 
     val completedLessonsCount = remember(modules, userProfile.completedLessonIds) {
@@ -125,6 +140,8 @@ fun PathLearningScreen(
     var showRoadmapDialog by remember { mutableStateOf(false) }
     var selectedLevelFilter by remember { mutableStateOf<Int?>(null) }
     var displayMode by remember { mutableStateOf(HomeLessonsDisplayMode.LIST_BY_LEVEL) }
+    var selectedTierForGuidebook by remember { mutableStateOf<DifficultyTier?>(null) }
+    var selectedRewardChestLevel by remember { mutableStateOf<Int?>(null) }
 
     val filteredLevelsMap = remember(modulesByLevel, selectedLevelFilter) {
         if (selectedLevelFilter == null) {
@@ -153,7 +170,8 @@ fun PathLearningScreen(
                     totalLessonsCount = modules.size,
                     nextAvailableLesson = nextAvailableLesson,
                     onContinueLesson = onStartLesson,
-                    onOpenLevelRoadmap = { showRoadmapDialog = true }
+                    onOpenLevelRoadmap = { showRoadmapDialog = true },
+                    onOpenLanguageSelection = onOpenLanguageSelection
                 )
             }
 
@@ -164,6 +182,16 @@ fun PathLearningScreen(
                     isBannerHidden = isStreakBannerHidden,
                     onHideBanner = onHideStreakBanner,
                     onOpenStreakDetail = onOpenStreakPopup
+                )
+            }
+
+            // 2b. Material 3 Visual Streak Calendar & Daily Goal Card ("Calendario de rachas y meta diaria")
+            item {
+                UserStreakCalendarCard(
+                    streakInfo = streakInfo,
+                    dailyGoalState = dailyGoalState,
+                    onSelectDailyGoalXp = onSelectDailyGoalXp,
+                    onTriggerCelebration = onTriggerDailyGoalCelebration
                 )
             }
 
@@ -192,16 +220,17 @@ fun PathLearningScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        val strings = com.example.ui.theme.LocalAppStrings.current
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Lecciones por Nivel",
+                                text = strings.personalizedCourseTitle,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.onBackground,
                                 modifier = Modifier.testTag("lessons_by_level_heading")
                             )
                             Text(
-                                text = "${modules.size} lecciones en ${modulesByLevel.size} niveles de dificultad",
+                                text = "${modules.size} • ${modulesByLevel.size} ${strings.navPath}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -217,13 +246,13 @@ fun PathLearningScreen(
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Default.ViewList,
-                                        contentDescription = "Vista de lista por nivel",
+                                        contentDescription = strings.personalizedCourseTitle,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 },
                                 label = {
                                     Text(
-                                        text = "Niveles",
+                                        text = "1-${modulesByLevel.size}",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -236,13 +265,13 @@ fun PathLearningScreen(
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Default.AccountTree,
-                                        contentDescription = "Vista de ruta",
+                                        contentDescription = strings.navPath,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 },
                                 label = {
                                     Text(
-                                        text = "Ruta",
+                                        text = strings.navPath,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -264,13 +293,13 @@ fun PathLearningScreen(
                             onClick = { selectedLevelFilter = null },
                             label = {
                                 Text(
-                                    text = "Todos (${modules.size})",
-                                    fontWeight = FontWeight.Bold,
+                                    text = "Todos los Niveles (${modules.size})",
+                                    fontWeight = FontWeight.Black,
                                     fontSize = 12.sp
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = DuoGreen.copy(alpha = 0.18f),
+                                selectedContainerColor = DuoGreen.copy(alpha = 0.22f),
                                 selectedLabelColor = DuoGreenDark
                             ),
                             modifier = Modifier.testTag("level_filter_all")
@@ -278,6 +307,16 @@ fun PathLearningScreen(
 
                         modulesByLevel.forEach { (levelNumber, levelModules) ->
                             val isLevelUnlocked = levelInfo.level >= levelNumber
+                            val tier = LevelSystem.DIFFICULTY_TIERS.getOrNull(levelNumber - 1)
+                            val badgeEmoji = tier?.badgeEmoji ?: "🎯"
+                            val tierShortTitle = when (levelNumber) {
+                                1 -> "Principiante"
+                                2 -> "Básico"
+                                3 -> "Intermedio"
+                                4 -> "Avanzado"
+                                5 -> "Élite"
+                                else -> "Nv. $levelNumber"
+                            }
                             FilterChip(
                                 selected = selectedLevelFilter == levelNumber,
                                 onClick = {
@@ -285,21 +324,20 @@ fun PathLearningScreen(
                                         if (selectedLevelFilter == levelNumber) null else levelNumber
                                 },
                                 leadingIcon = {
-                                    Icon(
-                                        imageVector = if (isLevelUnlocked) Icons.Default.Check else Icons.Default.Lock,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp)
+                                    Text(
+                                        text = badgeEmoji,
+                                        fontSize = 13.sp
                                     )
                                 },
                                 label = {
                                     Text(
-                                        text = "Nivel $levelNumber (${levelModules.size})",
+                                        text = "$tierShortTitle (${levelModules.size})",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp
                                     )
                                 },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = DuoPurple.copy(alpha = 0.16f),
+                                    selectedContainerColor = DuoPurple.copy(alpha = 0.18f),
                                     selectedLabelColor = DuoPurple
                                 ),
                                 modifier = Modifier.testTag("level_filter_$levelNumber")
@@ -310,17 +348,24 @@ fun PathLearningScreen(
             }
 
             if (displayMode == HomeLessonsDisplayMode.LIST_BY_LEVEL) {
-                // Material 3 Grouped Lessons List by Level
+                // Material 3 Grouped Lessons List by Difficulty Level (Duolingo Style)
                 filteredLevelsMap.forEach { (levelNumber, lessonsInLevel) ->
+                    val isAllInLevelCompleted = lessonsInLevel.isNotEmpty() &&
+                        lessonsInLevel.all { isLessonModuleCompleted(it, userProfile.completedLessonIds) }
+
+                    // Duolingo 3D Unit Banner Card
                     item(key = "header_level_$levelNumber") {
-                        LevelSectionHeaderCard(
+                        DuolingoUnitBannerCard(
                             level = levelNumber,
                             lessonsInLevel = lessonsInLevel,
                             completedLessonIds = userProfile.completedLessonIds,
-                            userLevel = levelInfo.level
+                            userLevel = levelInfo.level,
+                            onOpenGuidebook = { selectedTierForGuidebook = it },
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                         )
                     }
 
+                    // Available Lessons within this difficulty level
                     itemsIndexed(
                         items = lessonsInLevel,
                         key = { _, lesson -> "list_${lesson.id}" }
@@ -332,7 +377,7 @@ fun PathLearningScreen(
                             isLessonModuleCompleted(modules[globalIndex - 1], userProfile.completedLessonIds)
                         val isUnlocked = isLevelUnlocked && (indexInLevel == 0 || isPreviousCompleted || isCompleted)
 
-                        Material3LessonCard(
+                        DuolingoLessonItemCard(
                             module = module,
                             lessonOrderNumber = globalIndex + 1,
                             isCompleted = isCompleted,
@@ -348,6 +393,16 @@ fun PathLearningScreen(
                                     onStartLesson(module)
                                 }
                             }
+                        )
+                    }
+
+                    // Duolingo Reward Chest Checkpoint for the difficulty unit
+                    item(key = "chest_level_$levelNumber") {
+                        DuolingoRewardChestCard(
+                            level = levelNumber,
+                            isUnitCompleted = isAllInLevelCompleted,
+                            onOpenChest = { selectedRewardChestLevel = levelNumber },
+                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                         )
                     }
                 }
@@ -436,6 +491,22 @@ fun PathLearningScreen(
             LevelRoadmapDialog(
                 levelInfo = levelInfo,
                 onDismiss = { showRoadmapDialog = false }
+            )
+        }
+
+        // Section Guidebook Dialog (Duolingo Guía de la Unidad)
+        selectedTierForGuidebook?.let { tier ->
+            SectionGuidebookDialog(
+                tier = tier,
+                onDismiss = { selectedTierForGuidebook = null }
+            )
+        }
+
+        // Section Reward Chest Dialog (Cofre de Recompensa de Unidad)
+        selectedRewardChestLevel?.let { lvl ->
+            UnitChestRewardDialog(
+                level = lvl,
+                onDismiss = { selectedRewardChestLevel = null }
             )
         }
     }

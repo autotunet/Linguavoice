@@ -69,9 +69,13 @@ import com.example.data.model.WordAccuracy
 import com.example.ui.components.CurrentLevelTopProgressBar
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
+import com.example.ui.components.GameOverDialog
 import com.example.ui.components.LevelRestartedByZeroLivesDialog
 import com.example.ui.components.LivesBarIndicator
+import com.example.ui.components.LivesCounterComponent
 import com.example.ui.components.MascotBubble
+import com.example.ui.components.MicrophoneRecognitionVerificationCard
+import com.example.ui.components.NativeWaveformComparisonCard
 import com.example.ui.components.PronunciationResultSheet
 import com.example.ui.components.PronunciationSuccessCelebrationOverlay
 import com.example.ui.components.PulsingMicHalo
@@ -82,6 +86,7 @@ import com.example.ui.theme.DuoGreen
 import com.example.ui.theme.DuoGreenLight
 import com.example.ui.theme.DuoOrange
 import com.example.ui.theme.DuoRed
+import com.example.ui.theme.LocalAppStrings
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.LanguageGameViewModel
 import com.example.ui.viewmodel.RecognitionStatus
@@ -103,6 +108,9 @@ fun SpeakingExerciseScreen(
     val livesState by viewModel.livesState.collectAsState()
     val levelProgress by viewModel.levelProgressState.collectAsState()
     val celebrationState by viewModel.celebrationState.collectAsState()
+    val nativeComparisonState by viewModel.nativeAudioComparisonState.collectAsState()
+    val spokenLanguage by viewModel.selectedSpokenLanguage.collectAsState()
+    val strings = LocalAppStrings.current
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -188,12 +196,24 @@ fun SpeakingExerciseScreen(
                 closeButtonTestTag = "exercise_close_button"
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Dedicated 'Lives' counter component at the top of the UI
+            LivesCounterComponent(
+                currentLives = livesState.currentLives,
+                maxLives = livesState.maxLives,
+                accuracyThreshold = livesState.accuracyThreshold,
+                lastScorePercentage = result?.scorePercentage,
+                onLivesClick = { viewModel.setHeartsDialogVisible(true) },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Mascot Prompt
             MascotBubble(
-                message = currentEx.promptQuestion,
-                subMessage = "Escucha atentamente el acento y repítelo con el micrófono."
+                message = currentEx.getLocalizedPromptQuestion(spokenLanguage),
+                subMessage = strings.micTapToRecord
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -318,18 +338,49 @@ fun SpeakingExerciseScreen(
                         modifier = Modifier.padding(top = 8.dp)
                     )
 
-                    // Translation
+                    // Translation in the user's spoken language
                     Text(
-                        text = currentEx.translation,
+                        text = "${spokenLanguage.flagEmoji} ${spokenLanguage.displayName}: ${currentEx.getLocalizedTranslation(spokenLanguage)}",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .testTag("exercise_spoken_language_translation"),
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Native Speaker Audio File (.wav) Player & Side-by-Side / Overlay Waveform Comparison Card
+            NativeWaveformComparisonCard(
+                comparisonState = nativeComparisonState,
+                isUserListening = isListening,
+                liveRmsDb = rmsDb,
+                onPlayNativeAudio = { speed -> viewModel.playNativeReferenceAudio(speed) },
+                onStopNativeAudio = { viewModel.stopNativeReferenceAudio() },
+                onStartUserRecording = { startMicWithPermissionCheck() },
+                onPlayUserAudio = { viewModel.playUserRecordedAudio() },
+                onStopUserAudio = { viewModel.stopUserRecordedAudio() }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Real-time Microphone Question/Word Verification Card
+            MicrophoneRecognitionVerificationCard(
+                appPromptOrQuestion = currentEx.getLocalizedPromptQuestion(spokenLanguage),
+                expectedTargetWords = currentEx.targetPhrase,
+                recognizedSpokenText = pronunciationState.recognizedText.ifBlank { liveTranscript },
+                isListening = isListening,
+                evaluationStatus = result?.feedbackStatus ?: pronunciationState.feedbackStatus,
+                scorePercentage = result?.scorePercentage,
+                isPlayingUserAudio = nativeComparisonState.isPlayingUserAudio,
+                onPlayUserAudio = { viewModel.playUserRecordedAudio() },
+                onStopUserAudio = { viewModel.stopUserRecordedAudio() }
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Speech Recognition Visualizer & Real-Time Voice-to-Text Stream
             WaveformVisualizer(
@@ -400,14 +451,15 @@ fun SpeakingExerciseScreen(
 
             Text(
                 text = when {
-                    isListening -> "¡Te escuchamos en tiempo real! Habla ahora..."
-                    pronunciationState.status == RecognitionStatus.ANALYZING -> "Convirtiendo voz a texto y evaluando..."
-                    else -> "Toca el micrófono y pronuncia la frase"
+                    isListening -> strings.micRecordingNow
+                    pronunciationState.status == RecognitionStatus.ANALYZING -> strings.micAnalyzingVoice
+                    else -> strings.micTapToRecord
                 },
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 color = if (isListening) DuoRed else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = 12.dp)
+                modifier = Modifier.padding(top = 12.dp),
+                textAlign = TextAlign.Center
             )
 
             if (isListening) {
@@ -430,14 +482,48 @@ fun SpeakingExerciseScreen(
                 )
             }
 
+            // Inline Motivational Accuracy Feedback + Score/Accuracy & Target vs Input Comparison Card right after voice recording
+            result?.let { evalResult ->
+                Spacer(modifier = Modifier.height(14.dp))
+                com.example.ui.components.PronunciationAccuracyMotivationalFeedback(
+                    result = evalResult,
+                    onWordClick = { word -> viewModel.speakWord(word) },
+                    onListenTargetClick = { viewModel.speakTargetPhrase(0.85f) },
+                    onRetryClick = { viewModel.retryCurrentExercise() },
+                    onReplayMotivationalAnimation = {
+                        if (evalResult.isPassed) {
+                            viewModel.replayCelebrationEffect()
+                        } else {
+                            viewModel.replayLastFeedbackSound()
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                com.example.ui.components.PronunciationScoreComparisonCard(
+                    result = evalResult,
+                    isPlayingUserAudio = nativeComparisonState.isPlayingUserAudio,
+                    onListenTargetClick = { viewModel.speakTargetPhrase(0.85f) },
+                    onPlayUserAudioClick = { viewModel.playUserRecordedAudio() },
+                    onStopUserAudioClick = { viewModel.stopUserRecordedAudio() },
+                    onWordClick = { word -> viewModel.speakWord(word) },
+                    onRetryClick = { viewModel.retryCurrentExercise() }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                com.example.ui.components.VoicePronunciationStatusBanner(
+                    result = evalResult,
+                    onListenTargetClick = { viewModel.speakTargetPhrase(0.8f) },
+                    onRetryClick = { viewModel.retryCurrentExercise() }
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Alternative STT & Testing options
+            // Alternative STT & Testing options (Correcta, Casi correcta, Incorrecta)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 120.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // System STT Dialog
@@ -454,7 +540,7 @@ fun SpeakingExerciseScreen(
                                 startMicWithPermissionCheck()
                             }
                         }
-                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                        .padding(horizontal = 6.dp, vertical = 10.dp)
                         .testTag("system_stt_button"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
@@ -463,41 +549,64 @@ fun SpeakingExerciseScreen(
                         imageVector = Icons.Default.KeyboardVoice,
                         contentDescription = "Voz del sistema",
                         tint = DuoBlue,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Text(
-                        text = "Voz Sistema",
+                        text = "Voz",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = DuoBlue,
-                        modifier = Modifier.padding(start = 4.dp)
+                        modifier = Modifier.padding(start = 3.dp)
                     )
                 }
 
-                // Demo audio simulation (Pass)
+                // Demo audio simulation (Correcta)
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
-                        .border(1.5.dp, DuoCardBorder, RoundedCornerShape(14.dp))
-                        .background(Color.White)
+                        .border(1.5.dp, DuoGreen.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                        .background(Color(0xFFF2FCE8))
                         .clickable {
                             viewModel.simulateSpeakingDemo(currentEx.targetPhrase)
                         }
-                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                        .padding(horizontal = 6.dp, vertical = 10.dp)
                         .testTag("simulate_speech_demo"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "⚡ Demo OK",
+                        text = "✓ Correcta",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF2E7D32)
                     )
                 }
 
-                // Demo pronunciation error simulation (Loses 1 life, restarts level at 0)
+                // Demo audio simulation (Casi correcta)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.5.dp, DuoOrange.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                        .background(Color(0xFFFFF8E1))
+                        .clickable {
+                            viewModel.simulateAlmostCorrectPronunciation()
+                        }
+                        .padding(horizontal = 6.dp, vertical = 10.dp)
+                        .testTag("simulate_almost_correct_demo"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "≈ Casi",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFB78103)
+                    )
+                }
+
+                // Demo pronunciation error simulation (Incorrecta, Loses 1 life)
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -507,13 +616,13 @@ fun SpeakingExerciseScreen(
                         .clickable {
                             viewModel.simulatePronunciationError()
                         }
-                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                        .padding(horizontal = 6.dp, vertical = 10.dp)
                         .testTag("simulate_error_demo"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "💔 Error (-1)",
+                        text = "✕ Error",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = DuoRed
@@ -547,16 +656,14 @@ fun SpeakingExerciseScreen(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // Modal Dialog when lives reach 0 and the level restarts
-        if (livesState.isLevelRestartedByZeroLives) {
-            LevelRestartedByZeroLivesDialog(
-                lastFailedResult = livesState.lastFailedResultBeforeRestart,
+        // Game Over Modal Dialog when lives reach 0 and the level restarts
+        if (livesState.isGameOver || livesState.isLevelRestartedByZeroLives) {
+            GameOverDialog(
+                lastFailedResult = livesState.lastFailedResultBeforeRestart ?: result,
                 levelRestartCount = livesState.levelRestartCount,
-                onConfirmRestart = { viewModel.acknowledgeLevelRestart() },
-                onExitToMap = {
-                    viewModel.acknowledgeLevelRestart()
-                    viewModel.navigateTo(AppScreen.PATH_LEARN)
-                }
+                accuracyThreshold = livesState.accuracyThreshold,
+                onConfirmRestart = { viewModel.restartLevelFromGameOver() },
+                onExitToMap = { viewModel.exitGameOverToMap() }
             )
         }
     }

@@ -41,14 +41,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ads.AdMobBanner
+import com.example.ads.AdMobSdkStatusCard
 import com.example.data.model.LevelSystem
 import com.example.data.model.UserProfile
 import com.example.data.repository.StreakInfo
+import com.example.ui.components.DailyGoalCelebrationState
 import com.example.ui.components.DailyStreakCard
 import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
 import com.example.ui.components.LevelProgressBar
 import com.example.ui.components.MascotBubble
+import com.example.ui.components.UserStreakCalendarCard
 import com.example.ui.components.WeeklyActivityChart
 import com.example.ui.theme.DuoBlue
 import com.example.ui.theme.DuoCardBorder
@@ -60,6 +63,9 @@ import com.example.ui.theme.DuoRed
 fun ProfileScreen(
     userProfile: UserProfile,
     streakInfo: StreakInfo,
+    dailyGoalState: DailyGoalCelebrationState = DailyGoalCelebrationState(),
+    onSelectDailyGoalXp: (Int) -> Unit = {},
+    onTriggerDailyGoalCelebration: () -> Unit = {},
     onChangeLanguage: () -> Unit,
     onRefillHearts: () -> Unit,
     modifier: Modifier = Modifier
@@ -120,20 +126,21 @@ fun ProfileScreen(
                             .clip(RoundedCornerShape(14.dp))
                             .border(1.5.dp, DuoCardBorder, RoundedCornerShape(14.dp))
                             .clickable { onChangeLanguage() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("profile_change_language_pair_button"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(text = userProfile.selectedLanguage.flagEmoji, fontSize = 18.sp)
+                        Text(text = userProfile.spokenLanguage.flagEmoji, fontSize = 16.sp)
                         Text(
-                            text = "Aprendiendo ${userProfile.selectedLanguage.displayName}",
+                            text = "Hablas ${userProfile.spokenLanguage.displayName} → Aprendes ${userProfile.selectedLanguage.flagEmoji} ${userProfile.selectedLanguage.displayName}",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = DuoBlue
                         )
                         Icon(
                             imageVector = Icons.Default.Language,
-                            contentDescription = "Cambiar",
+                            contentDescription = "Cambiar idiomas",
                             tint = DuoBlue,
                             modifier = Modifier.size(16.dp)
                         )
@@ -147,6 +154,16 @@ fun ProfileScreen(
             LevelProgressBar(
                 levelInfo = levelInfo,
                 modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+
+        // Monthly Streak Calendar & Daily Goal Card
+        item {
+            UserStreakCalendarCard(
+                streakInfo = streakInfo,
+                dailyGoalState = dailyGoalState,
+                onSelectDailyGoalXp = onSelectDailyGoalXp,
+                onTriggerCelebration = onTriggerDailyGoalCelebration
             )
         }
 
@@ -298,6 +315,12 @@ fun ProfileScreen(
                     }
                 }
             }
+        }
+
+        item {
+            AdMobSdkStatusCard(
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
 
         item {

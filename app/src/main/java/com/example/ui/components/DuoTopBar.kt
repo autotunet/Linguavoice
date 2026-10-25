@@ -65,7 +65,7 @@ fun DuoTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Language Selector Pill
+            // Language Selector Pill (Spoken -> Target)
             Row(
                 modifier = Modifier
                     .testTag("language_selector_pill")
@@ -75,8 +75,18 @@ fun DuoTopBar(
                     .clickable { onLanguageClick() }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                Text(
+                    text = userProfile.spokenLanguage.flagEmoji,
+                    fontSize = 15.sp
+                )
+                Text(
+                    text = "→",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                    color = DuoBlue
+                )
                 Text(
                     text = userProfile.selectedLanguage.flagEmoji,
                     fontSize = 18.sp

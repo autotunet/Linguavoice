@@ -27,11 +27,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.Card
@@ -44,6 +46,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -65,16 +68,20 @@ import com.example.ui.components.DuoButton
 import com.example.ui.components.DuoButtonColor
 import com.example.ui.components.DuoTopBar
 import com.example.ui.components.HeartsInfoDialog
+import com.example.ui.components.LanguagePairOnboardingDialog
 import com.example.ui.components.LanguageSelectionDialog
 import com.example.ui.screens.DialogueScreen
 import com.example.ui.screens.FreePracticeScreen
+import com.example.ui.screens.LanguageSelectionScreen
 import com.example.ui.screens.PathLearningScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.SpeakingExerciseScreen
+import com.example.ui.theme.AppStrings
 import com.example.ui.theme.DuoBlue
 import com.example.ui.theme.DuoCardBorder
 import com.example.ui.theme.DuoGreen
 import com.example.ui.theme.DuoGreenLight
+import com.example.ui.theme.LocalAppStrings
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.LanguageGameViewModel
@@ -99,7 +106,16 @@ fun LinguaVoiceApp(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val userProfile by viewModel.userProfile.collectAsState()
     val streakInfo by viewModel.streakInfo.collectAsState()
+    val heartsAndStreakState by viewModel.heartsAndStreakState.collectAsState()
     val userLevelInfo by viewModel.userLevelInfo.collectAsState()
+    val dailyGoalState by viewModel.dailyGoalState.collectAsState()
+    val selectedSpokenLanguage by viewModel.selectedSpokenLanguage.collectAsState()
+    val selectedTargetLanguage by viewModel.selectedTargetLanguage.collectAsState()
+    val selectedLearningFocus by viewModel.selectedLearningFocus.collectAsState()
+    val targetLanguagePreference by viewModel.targetLanguagePreference.collectAsState()
+    val personalizedModules by viewModel.personalizedModules.collectAsState()
+    val personalizedModulesByLevel by viewModel.personalizedModulesByLevel.collectAsState()
+    val showLanguagePairOnboarding by viewModel.showLanguagePairOnboarding.collectAsState()
     val showLanguageDialog by viewModel.showLanguageDialog.collectAsState()
     val showHeartsDialog by viewModel.showHeartsDialog.collectAsState()
     val showDailyStreakPopup by viewModel.showDailyStreakPopup.collectAsState()
@@ -132,15 +148,25 @@ fun LinguaVoiceApp(
         viewModel.navigateTo(AppScreen.PATH_LEARN)
     }
 
+    val appStrings = remember(selectedSpokenLanguage) {
+        AppStrings.forSpokenLanguage(selectedSpokenLanguage)
+    }
+
+    CompositionLocalProvider(LocalAppStrings provides appStrings) {
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding(),
         topBar = {
-            if (currentScreen != AppScreen.EXERCISE_SESSION) {
+            if (currentScreen != AppScreen.EXERCISE_SESSION && currentScreen != AppScreen.LANGUAGE_SELECTION) {
                 DuoTopBar(
-                    userProfile = userProfile.copy(streakDays = streakInfo.currentStreak),
-                    onLanguageClick = { viewModel.setLanguageDialogVisible(true) },
+                    userProfile = userProfile.copy(
+                        spokenLanguage = selectedSpokenLanguage,
+                        selectedLanguage = selectedTargetLanguage,
+                        hearts = heartsAndStreakState.hearts,
+                        streakDays = maxOf(streakInfo.currentStreak, heartsAndStreakState.currentStreak)
+                    ),
+                    onLanguageClick = { viewModel.openLanguageSelectionScreen() },
                     onHeartsClick = { viewModel.setHeartsDialogVisible(true) },
                     onStreakClick = { viewModel.openDailyStreakPopup() },
                     levelInfo = userLevelInfo
@@ -160,6 +186,7 @@ fun LinguaVoiceApp(
                         AppScreen.DIALOGUE -> com.example.ads.AdMobManager.AD_UNIT_ID_3
                         AppScreen.PROFILE -> com.example.ads.AdMobManager.AD_UNIT_ID_4
                         AppScreen.EXERCISE_SESSION -> com.example.ads.AdMobManager.AD_UNIT_ID_5
+                        AppScreen.LANGUAGE_SELECTION -> com.example.ads.AdMobManager.AD_UNIT_ID_6
                     }
                     com.example.ads.AdMobBanner(
                         adUnitId = screenBannerAdUnitId,
@@ -193,13 +220,61 @@ fun LinguaVoiceApp(
             when (currentScreen) {
                 AppScreen.PATH_LEARN -> {
                     PathLearningScreen(
-                        userProfile = userProfile,
-                        streakInfo = streakInfo,
+                        userProfile = userProfile.copy(
+                            spokenLanguage = selectedSpokenLanguage,
+                            selectedLanguage = selectedTargetLanguage,
+                            hearts = heartsAndStreakState.hearts,
+                            streakDays = maxOf(streakInfo.currentStreak, heartsAndStreakState.currentStreak)
+                        ),
+                        streakInfo = streakInfo.copy(
+                            currentStreak = maxOf(streakInfo.currentStreak, heartsAndStreakState.currentStreak),
+                            bestStreak = maxOf(streakInfo.bestStreak, heartsAndStreakState.bestStreak),
+                            practicedToday = streakInfo.practicedToday || heartsAndStreakState.practicedToday
+                        ),
                         levelInfo = userLevelInfo,
+                        dailyGoalState = dailyGoalState,
+                        onSelectDailyGoalXp = { targetXp -> viewModel.setDailyXpGoal(targetXp) },
+                        onTriggerDailyGoalCelebration = { viewModel.triggerDailyGoalCelebration() },
                         isStreakBannerHidden = isStreakBannerHidden,
                         onHideStreakBanner = { viewModel.setStreakBannerHidden(true) },
                         onOpenStreakPopup = { viewModel.openDailyStreakPopup() },
+                        personalizedModules = personalizedModules,
+                        personalizedModulesByLevel = personalizedModulesByLevel,
+                        onOpenLanguageSelection = { viewModel.openLanguageSelectionScreen() },
                         onStartLesson = { module -> viewModel.startLesson(module) }
+                    )
+                }
+                AppScreen.LANGUAGE_SELECTION -> {
+                    LanguageSelectionScreen(
+                        currentLanguage = selectedTargetLanguage,
+                        currentLearningFocus = selectedLearningFocus,
+                        roomPreferenceEntity = targetLanguagePreference,
+                        currentSpokenLanguage = selectedSpokenLanguage,
+                        onSelectTargetLanguage = { language, focus, goHome ->
+                            viewModel.selectLanguage(
+                                language = language,
+                                learningFocusGoal = focus,
+                                navigateToHome = goHome,
+                                spokenLanguage = selectedSpokenLanguage
+                            )
+                        },
+                        onSelectLanguagePair = { spoken, target, focus, goHome ->
+                            viewModel.selectLanguagePair(
+                                spokenLanguage = spoken,
+                                targetLanguage = target,
+                                learningFocusGoal = focus,
+                                navigateToHome = goHome
+                            )
+                        },
+                        onPlayLanguageSample = { language ->
+                            viewModel.speakLanguageGreeting(language)
+                        },
+                        onStartPersonalizedLesson = { module ->
+                            viewModel.startLesson(module)
+                        },
+                        onBack = {
+                            viewModel.navigateTo(AppScreen.PATH_LEARN)
+                        }
                     )
                 }
                 AppScreen.EXERCISE_SESSION -> {
@@ -209,25 +284,43 @@ fun LinguaVoiceApp(
                 }
                 AppScreen.FREE_PRACTICE -> {
                     FreePracticeScreen(
-                        userProfile = userProfile,
+                        userProfile = userProfile.copy(
+                            spokenLanguage = selectedSpokenLanguage,
+                            selectedLanguage = selectedTargetLanguage
+                        ),
                         levelInfo = userLevelInfo,
                         onSelectExercise = { exercise -> viewModel.startCustomExercise(exercise) },
                         onPlayAudio = { phrase ->
-                            viewModel.ttsManager.speak(phrase, userProfile.selectedLanguage)
+                            viewModel.ttsManager.speak(phrase, selectedTargetLanguage)
                         }
                     )
                 }
                 AppScreen.DIALOGUE -> {
                     DialogueScreen(
                         viewModel = viewModel,
-                        userProfile = userProfile
+                        userProfile = userProfile.copy(
+                            spokenLanguage = selectedSpokenLanguage,
+                            selectedLanguage = selectedTargetLanguage
+                        )
                     )
                 }
                 AppScreen.PROFILE -> {
                     ProfileScreen(
-                        userProfile = userProfile.copy(streakDays = streakInfo.currentStreak),
-                        streakInfo = streakInfo,
-                        onChangeLanguage = { viewModel.setLanguageDialogVisible(true) },
+                        userProfile = userProfile.copy(
+                            spokenLanguage = selectedSpokenLanguage,
+                            selectedLanguage = selectedTargetLanguage,
+                            hearts = heartsAndStreakState.hearts,
+                            streakDays = maxOf(streakInfo.currentStreak, heartsAndStreakState.currentStreak)
+                        ),
+                        streakInfo = streakInfo.copy(
+                            currentStreak = maxOf(streakInfo.currentStreak, heartsAndStreakState.currentStreak),
+                            bestStreak = maxOf(streakInfo.bestStreak, heartsAndStreakState.bestStreak),
+                            practicedToday = streakInfo.practicedToday || heartsAndStreakState.practicedToday
+                        ),
+                        dailyGoalState = dailyGoalState,
+                        onSelectDailyGoalXp = { targetXp -> viewModel.setDailyXpGoal(targetXp) },
+                        onTriggerDailyGoalCelebration = { viewModel.triggerDailyGoalCelebration() },
+                        onChangeLanguage = { viewModel.openLanguageSelectionScreen() },
                         onRefillHearts = {
                             val act = context as? android.app.Activity
                             if (act != null) {
@@ -244,6 +337,13 @@ fun LinguaVoiceApp(
         }
     }
 
+    // Daily Goal Celebration Animation Overlay ("Animación de celebración al alcanzar metas diarias")
+    com.example.ui.components.DailyGoalCelebrationOverlay(
+        state = dailyGoalState,
+        onReplayCelebration = { viewModel.replayDailyGoalCelebration() },
+        onDismiss = { viewModel.dismissDailyGoalCelebration() }
+    )
+
     // Emergent Once-Per-Day Streak Popup
     if (showDailyStreakPopup) {
         com.example.ui.components.StreakDetailDialog(
@@ -253,18 +353,41 @@ fun LinguaVoiceApp(
         )
     }
 
+    // Initial Onboarding Dialog asking what language the user speaks and what language they want to learn
+    if (showLanguagePairOnboarding && currentScreen != AppScreen.LANGUAGE_SELECTION) {
+        LanguagePairOnboardingDialog(
+            initialSpokenLanguage = selectedSpokenLanguage,
+            initialTargetLanguage = selectedTargetLanguage,
+            onConfirmLanguagePair = { spoken, target ->
+                viewModel.selectLanguagePair(
+                    spokenLanguage = spoken,
+                    targetLanguage = target,
+                    learningFocusGoal = selectedLearningFocus,
+                    navigateToHome = true
+                )
+            },
+            onOpenFullLanguageScreen = {
+                viewModel.dismissLanguagePairOnboarding()
+                viewModel.openLanguageSelectionScreen()
+            },
+            onDismiss = { viewModel.dismissLanguagePairOnboarding() }
+        )
+    }
+
     // Dialogs
     if (showLanguageDialog) {
         LanguageSelectionDialog(
-            selectedLanguage = userProfile.selectedLanguage,
+            selectedLanguage = selectedTargetLanguage,
+            selectedSpokenLanguage = selectedSpokenLanguage,
             onSelectLanguage = { lang -> viewModel.selectLanguage(lang) },
+            onSelectSpokenLanguage = { spoken -> viewModel.selectSpokenLanguage(spoken) },
             onDismiss = { viewModel.setLanguageDialogVisible(false) }
         )
     }
 
     if (showHeartsDialog) {
         HeartsInfoDialog(
-            currentHearts = userProfile.hearts,
+            currentHearts = heartsAndStreakState.hearts,
             onRefill = {
                 val act = context as? android.app.Activity
                 if (act != null) {
@@ -277,6 +400,7 @@ fun LinguaVoiceApp(
             },
             onDismiss = { viewModel.setHeartsDialogVisible(false) }
         )
+    }
     }
 }
 
@@ -338,6 +462,7 @@ fun LinguaVoiceBottomBar(
     currentScreen: AppScreen,
     onNavigate: (AppScreen) -> Unit
 ) {
+    val strings = LocalAppStrings.current
     NavigationBar(
         modifier = Modifier
             .fillMaxWidth()
@@ -351,12 +476,12 @@ fun LinguaVoiceBottomBar(
             icon = {
                 Icon(
                     imageVector = if (currentScreen == AppScreen.PATH_LEARN) Icons.Filled.School else Icons.Outlined.School,
-                    contentDescription = "Aprender"
+                    contentDescription = strings.navPath
                 )
             },
             label = {
                 Text(
-                    text = "Aprender",
+                    text = strings.navPath,
                     fontWeight = if (currentScreen == AppScreen.PATH_LEARN) FontWeight.Bold else FontWeight.Normal
                 )
             },
@@ -374,12 +499,12 @@ fun LinguaVoiceBottomBar(
             icon = {
                 Icon(
                     imageVector = if (currentScreen == AppScreen.FREE_PRACTICE) Icons.Filled.FitnessCenter else Icons.Outlined.FitnessCenter,
-                    contentDescription = "Desafíos"
+                    contentDescription = strings.navLaboratory
                 )
             },
             label = {
                 Text(
-                    text = "Desafíos",
+                    text = strings.navLaboratory,
                     fontWeight = if (currentScreen == AppScreen.FREE_PRACTICE) FontWeight.Bold else FontWeight.Normal
                 )
             },
@@ -397,12 +522,12 @@ fun LinguaVoiceBottomBar(
             icon = {
                 Icon(
                     imageVector = if (currentScreen == AppScreen.DIALOGUE) Icons.Filled.ChatBubbleOutline else Icons.Outlined.ChatBubbleOutline,
-                    contentDescription = "Diálogo"
+                    contentDescription = strings.navDialogues
                 )
             },
             label = {
                 Text(
-                    text = "Diálogo",
+                    text = strings.navDialogues,
                     fontWeight = if (currentScreen == AppScreen.DIALOGUE) FontWeight.Bold else FontWeight.Normal
                 )
             },
@@ -415,17 +540,40 @@ fun LinguaVoiceBottomBar(
         )
 
         NavigationBarItem(
+            selected = currentScreen == AppScreen.LANGUAGE_SELECTION,
+            onClick = { onNavigate(AppScreen.LANGUAGE_SELECTION) },
+            icon = {
+                Icon(
+                    imageVector = if (currentScreen == AppScreen.LANGUAGE_SELECTION) Icons.Filled.Language else Icons.Outlined.Language,
+                    contentDescription = strings.navLanguages
+                )
+            },
+            label = {
+                Text(
+                    text = strings.navLanguages,
+                    fontWeight = if (currentScreen == AppScreen.LANGUAGE_SELECTION) FontWeight.Bold else FontWeight.Normal
+                )
+            },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = DuoBlue,
+                selectedTextColor = DuoBlue,
+                indicatorColor = DuoBlue.copy(alpha = 0.2f)
+            ),
+            modifier = Modifier.testTag("nav_tab_language")
+        )
+
+        NavigationBarItem(
             selected = currentScreen == AppScreen.PROFILE,
             onClick = { onNavigate(AppScreen.PROFILE) },
             icon = {
                 Icon(
                     imageVector = if (currentScreen == AppScreen.PROFILE) Icons.Filled.Person else Icons.Outlined.Person,
-                    contentDescription = "Progreso"
+                    contentDescription = strings.navProgress
                 )
             },
             label = {
                 Text(
-                    text = "Progreso",
+                    text = strings.navProgress,
                     fontWeight = if (currentScreen == AppScreen.PROFILE) FontWeight.Bold else FontWeight.Normal
                 )
             },

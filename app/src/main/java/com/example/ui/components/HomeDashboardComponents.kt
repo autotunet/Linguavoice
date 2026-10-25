@@ -117,6 +117,7 @@ fun UserProgressSummaryCard(
     nextAvailableLesson: LessonModule?,
     onContinueLesson: (LessonModule) -> Unit,
     onOpenLevelRoadmap: () -> Unit,
+    onOpenLanguageSelection: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val safeTotalLessons = totalLessonsCount.coerceAtLeast(1)
@@ -188,11 +189,22 @@ fun UserProgressSummaryCard(
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Text(
-                            text = "Curso de ${userProfile.selectedLanguage.displayName} ${userProfile.selectedLanguage.flagEmoji}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpenLanguageSelection() }
+                                .padding(vertical = 2.dp)
+                                .testTag("summary_change_language_button")
+                        ) {
+                            Text(
+                                text = "Hablas: ${userProfile.spokenLanguage.displayName} ${userProfile.spokenLanguage.flagEmoji} • Aprendes: ${userProfile.selectedLanguage.displayName} ${userProfile.selectedLanguage.flagEmoji} (Cambiar)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = DuoBlue
+                            )
+                        }
                     }
                 }
 
